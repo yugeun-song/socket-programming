@@ -1,8 +1,8 @@
 # socket-programming
 
-Socket programming study with the Windows and Linux ecosystems kept **fully separate**.
-There is no cross-platform abstraction layer: each tree is implemented natively and is
-idiomatic to its platform down to naming, brace style, line endings, and build system.
+Socket programming study with the Windows and Linux ecosystems kept fully separate.
+There is no cross-platform abstraction layer: each tree is implemented natively;
+naming, brace style, line endings, and build system all differ by platform.
 
 ## Layout
 
@@ -27,7 +27,7 @@ Conventions are enforced per tree because the two toolchains differ:
 
 ## linux/
 
-Native BSD sockets, no shim. Built with a hand-written Makefile.
+TCP and UDP echo over BSD sockets, built with a Makefile.
 
 ### build
 
@@ -55,8 +55,8 @@ make -C linux clean
 ### profiling & tracing
 
 The always-on flags (`-ggdb3`, frame pointers, no sibling-call optimization, async unwind
-tables) make the binaries first-class targets for perf, strace, gdb, valgrind, and uftrace
-dynamic tracing (`uftrace record -P. ./linux/bin/tcp/echo_client`). `-pg` for gprof /
+tables) keep the binaries debuggable and traceable under perf, strace, gdb, valgrind, and
+uftrace with no separate build (`uftrace record -P. ./linux/bin/tcp/echo_client`). `-pg` for gprof /
 mcount-based uftrace is opt-in via `make -C linux GPROF=1`.
 
 ## Winsock/
