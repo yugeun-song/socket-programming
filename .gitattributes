@@ -1,0 +1,24 @@
+# Default: normalize to LF in the repo, LF in the working tree
+* text=auto eol=lf
+
+# Linux tree keeps LF; Winsock tree keeps CRLF in the working tree
+linux/**    text eol=lf
+Winsock/**  text eol=crlf
+
+# Visual Studio project metadata is CRLF regardless of location
+*.sln              text eol=crlf
+*.vcxproj          text eol=crlf
+*.vcxproj.filters  text eol=crlf
+*.vcxproj.user     text eol=crlf
+*.props            text eol=crlf
+*.targets          text eol=crlf
+
+# Binaries - do not touch line endings
+*.exe binary
+*.dll binary
+*.lib binary
+*.o   binary
+*.obj binary
+*.a   binary
+*.pdb binary
+*.bin binary

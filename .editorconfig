@@ -1,0 +1,27 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = false
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Winsock tree follows Windows conventions: CRLF and a trailing newline
+[Winsock/**]
+end_of_line = crlf
+insert_final_newline = true
+
+# Visual Studio solution / project files are CRLF
+[*.{sln,vcxproj,filters,props,targets}]
+end_of_line = crlf
+
+# Makefiles need hard tabs
+[**/Makefile]
+indent_style = tab
+tab_width = 4
+
+# JSON / YAML / Markdown
+[*.{json,yml,yaml,md}]
+indent_size = 2
