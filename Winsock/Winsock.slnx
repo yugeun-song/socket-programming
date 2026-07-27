@@ -1,0 +1,9 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Common/NetUtils/NetUtils.vcxproj" />
+  <Project Path="Tcp/TcpEchoClient/TcpEchoClient.vcxproj" />
+  <Project Path="Tcp/TcpEchoServer/TcpEchoServer.vcxproj" />
+</Solution>
