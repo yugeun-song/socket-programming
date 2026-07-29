@@ -11,7 +11,7 @@ endif
 
 BIN_DIR  = bin
 LIB_DIRS = common
-SRC_DIRS = tcp udp epoll unix_domain
+SRC_DIRS = tcp udp zerocopy netlink epoll unix_domain
 
 LIB_SRCS = $(wildcard $(addsuffix /*.c,$(LIB_DIRS)))
 LIB_OBJS = $(patsubst %.c,$(BIN_DIR)/%.o,$(LIB_SRCS))
