@@ -57,9 +57,35 @@ at any moment, even where the program itself is single threaded and installs no 
 - Every blocking call handles `EINTR`. `tcp_accept` and `nl_send` retry internally; loops that need
   to notice a shutdown request let `EINTR` reach them and re-test their stop flag.
 - `sigaction`, never `signal`. `signal` carries historical SysV/BSD differences, and `sigaction`
-  is where `sa_mask` and the absence of `SA_RESTART` can be stated explicitly.
-- A handler assigns to a `volatile sig_atomic_t` flag and does nothing else. `SA_RESTART` is left
-  off on purpose so the blocked `recv` returns `EINTR` and the normal cleanup path runs.
+  is where `sa_mask` and `SA_RESTART` can be stated explicitly. `install_signal_handler` takes the
+  flag as an argument named at the call site — `SIGNAL_INTERRUPTS` or `SIGNAL_RESTARTS` — because
+  the choice belongs to the signal's purpose and not to a house default.
+- A handler assigns to a `volatile sig_atomic_t` flag and does nothing else. Which flag it is decides
+  whether `SA_RESTART` belongs: a stop signal must interrupt the wait, so `route_monitor` installs
+  `SIGINT` and `SIGTERM` with `SIGNAL_INTERRUPTS`; its `SIGUSR1` counter report must not tear the
+  wait down, so that one gets `SIGNAL_RESTARTS`, the same way `dd` reports progress. `SIG_IGN` takes
+  neither, since no handler runs and there is nothing to restart.
+- `SA_RESTART` does not cover everything. It restarts `recv` and friends, but never `poll`, `select`,
+  `epoll_wait`, or a socket carrying `SO_RCVTIMEO`. A program blocked in `poll_until` therefore sees
+  `EINTR` for every signal regardless of the flag, and the flag only documents intent there.
+- A timeout is an absolute instant, never a duration handed to each retry. `deadline_start` records
+  `CLOCK_MONOTONIC` plus the timeout once, and `deadline_left_ms` recomputes what is left on every
+  pass, so an `EINTR` retry shrinks the wait instead of restarting it. Passing the same `timeout_ms`
+  to a retried `poll` is how a two second bound turns into an unbounded one under repeated signals.
+  `CLOCK_MONOTONIC` rather than the wall clock, so a `clock_settime` jump cannot move the deadline.
+- Waiting also has to stop even when the wait never gets to report a timeout. `nl_recv_until` checks
+  `deadline_expired` before it polls, so a stream of `EINTR` that never lets `poll` return zero still
+  ends in `ETIMEDOUT` rather than spinning.
+- Testing a stop flag and then blocking is two steps, and a signal that lands between them is lost:
+  the handler sets the flag with nothing left to interrupt, and the program waits forever on a quiet
+  socket. `poll_until` therefore calls `ppoll`, and the long-running programs block the signals they
+  handle before entering the loop and hand `ppoll` the original mask. Unblocking and blocking become
+  one atomic step, so a signal delivered during the flag test stays pending and fires the moment the
+  wait begins.
+- `deadline_expired` answers a yes/no question, so it must not lose the sub-millisecond remainder.
+  Truncating the conversion made a 5 ms deadline expire at 4 ms and a 1 ms deadline expire before it
+  began. The remaining time is computed in nanoseconds and rounded up to the next millisecond, so
+  zero means the instant has genuinely passed.
 - No mutable globals. The one exception is that stop flag. Shared counters are C11 atomics:
   `nl_next_seq` hands out netlink sequence numbers with `atomic_fetch_add_explicit`.
 - Only thread-safe library calls: `strerror_r` not `strerror`, `inet_ntop` not `inet_ntoa`,
@@ -114,11 +140,19 @@ make -C linux clean
 ### layout
 
 - `common/net_util.{c,h}` — BSD helpers: `tcp_listen`, `tcp_connect`, `tcp_accept`, `udp_bind`,
-  `udp_connect`, `send_all`, `set_nonblocking`, `ignore_sigpipe`.
-- `common/nl_util.{c,h}` — netlink helpers: `nl_open`, `nl_join_group`, `nl_send`, `nl_recv`,
-  `nl_add_attr`, `nl_parse_attrs`, `nl_check_error`, `nl_next_seq`.
+  `udp_connect`, `send_all`, `set_nonblocking`, `ignore_sigpipe`, `install_signal_handler`.
+- `common/deadline.{c,h}` — absolute monotonic deadlines: `deadline_start`, `deadline_left_ms`,
+  `deadline_expired`, `poll_until`.
 - `common/log.{c,h}` — `log_msg` and `log_errno` write `program: function(): text` to stderr, so no
   call site repeats its own name. Results go to stdout with `printf`; diagnostics go to stderr.
+- `netlink/nl_util.{c,h}` — netlink helpers: `nl_open`, `nl_join_group`, `nl_send`, `nl_recv`,
+  `nl_recv_until`, `nl_add_attr`, `nl_parse_attrs`, `nl_check_error`, `nl_next_seq`. It sits beside
+  the programs that use it rather than in `common/`, because `netlink/` is its only consumer.
+  `common/` is for code more than one topic uses; a helper is promoted there when a second caller
+  appears, which is why iproute2 keeps `lib/libnetlink.c` in a library directory (`ip`, `ss`, `tc`
+  and `bridge` all use it) while subsystem-local helpers stay in their subsystem. The Makefile's
+  `TOPIC_LIB_SRCS` marks such a file as a library object so it is compiled but not linked as a
+  program of its own.
 - `tcp/` — `echo_server.c`, `echo_client.c`.
 - `udp/` — `echo_server.c`, `echo_client.c`.
 - `zerocopy/` — `sendfile_server.c`, `sendfile_client.c`, `splice_echo_server.c`,
@@ -176,8 +210,9 @@ a feature list.
   query, and `ifi_type` is what decides which link-layer header the caller will have to parse.
 - `route_monitor.c` — subscribe to `RTNLGRP_LINK`, the address groups and `RTNLGRP_IPV4_ROUTE`,
   then print events as they happen. A capture or firewall daemon that runs for days needs this to
-  notice that its interface went down or that an address moved. It is also where the signal-safe
-  shutdown lives: `SIGINT`/`SIGTERM` set a flag, `recv` returns `EINTR`, the loop exits normally.
+  notice that its interface went down or that an address moved. It is also where both halves of the
+  signal question live: `SIGINT`/`SIGTERM` interrupt the wait and end the loop, while `SIGUSR1`
+  reports the event counters with `SA_RESTART` set because reporting must not end anything.
 - `sock_diag_dump.c` — `SOCK_DIAG_BY_FAMILY` with `inet_diag_req_v2`, which is what `ss` runs.
   Needs `CONFIG_INET_DIAG`; without it the dump fails with `ENOENT` rather than the socket refusing
   to open.
@@ -190,7 +225,7 @@ a feature list.
   already selected, which is the path `ulogd` takes instead of an `AF_PACKET` capture socket. The
   kernel does the filtering; the program only reads what survived it.
 
-Details the protocol forces on the caller, all of them in `common/nl_util.c`:
+Details the protocol forces on the caller, all of them in `netlink/nl_util.c`:
 
 - Netlink is message-oriented, so a short `sendto` cannot be retried from the offset the way
   `send_all` retries a stream. A partial write is reported as `EMSGSIZE` instead.
@@ -207,6 +242,24 @@ Details the protocol forces on the caller, all of them in `common/nl_util.c`:
   `NLA_TYPE_MASK` before indexing. Without the mask every nested attribute is skipped.
 - A dump that raced with a change comes back with `NLM_F_DUMP_INTR` set and is inconsistent. The
   dump programs report it instead of printing a half-truth.
+- Nothing waits without a bound. `nl_recv_until` takes a `struct deadline`, so a dump or an
+  `NLM_F_ACK` reply that never arrives ends in `ETIMEDOUT` instead of hanging. `route_monitor` and
+  `nflog_listen` pass `DEADLINE_FOREVER` because waiting is their job; every request/reply exchange
+  passes a real bound.
+- A dump request for links has to carry `IFLA_EXT_MASK`. Without it the kernel never sizes the dump
+  buffer per device, and an interface whose `RTM_NEWLINK` message does not fit is left out of the
+  answer with no error anywhere. A netns holding one device with 400 long altnames reproduces it:
+  the dump silently returns one interface fewer than `ip link` lists.
+- `NLMSG_DONE` carries the dump's exit status in its payload. A dump the kernel abandoned part-way
+  still ends with `NLMSG_DONE`, so treating the message itself as success reports a truncated result
+  as a complete one. `nl_check_done` reads that `int` and turns it back into `errno`.
+- `ENOBUFS` on a multicast socket means the kernel dropped events this reader was too slow to take.
+  It is not a broken socket: the right response is to record the gap and keep reading, which is why
+  `route_monitor` counts overruns instead of exiting, and asks for a larger `SO_RCVBUF` up front.
+- The read buffer bounds what a single message may be. `nflog_listen` therefore asks the kernel for
+  a copy range that fits in it; requesting 64 KiB of every packet into a smaller buffer turns the
+  first large packet into `EMSGSIZE`. `nl_recv` reports that rather than parsing a truncated
+  datagram, and production code that cannot cap the size resizes with `MSG_PEEK | MSG_TRUNC`.
 
 `addr_manage add`/`del` and `nflog_listen` are the two that touch kernel state, so both carry the
 warning at the top of the file and were verified under QEMU rather than on the host. The rest only
