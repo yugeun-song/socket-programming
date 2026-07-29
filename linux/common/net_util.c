@@ -197,13 +197,35 @@ int set_nonblocking(int fd, int enable)
     return fcntl(fd, F_SETFL, flags);
 }
 
-int ignore_sigpipe(void)
+int install_signal_handler(int signo, void (*handler)(int), int flags)
 {
     struct sigaction sa = { 0 };
 
-    sa.sa_handler = SIG_IGN;
+    sa.sa_handler = handler;
+    sa.sa_flags = flags;
     if (sigemptyset(&sa.sa_mask) < 0) {
         return -1;
     }
-    return sigaction(SIGPIPE, &sa, NULL);
+    return sigaction(signo, &sa, NULL);
+}
+
+int ignore_sigpipe(void)
+{
+    return install_signal_handler(SIGPIPE, SIG_IGN, SIGNAL_INTERRUPTS);
+}
+
+int block_signals(const int *signos, size_t count, sigset_t *saved)
+{
+    sigset_t blocked;
+    size_t i;
+
+    if (sigemptyset(&blocked) < 0) {
+        return -1;
+    }
+    for (i = 0; i < count; ++i) {
+        if (sigaddset(&blocked, signos[i]) < 0) {
+            return -1;
+        }
+    }
+    return pthread_sigmask(SIG_BLOCK, &blocked, saved);
 }
