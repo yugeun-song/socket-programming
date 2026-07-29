@@ -1,9 +1,12 @@
-#include <stdio.h>
 #include <errno.h>
+#include <stdio.h>
 #include <unistd.h>
+
 #include <sys/socket.h>
+
 #include <netinet/in.h>
 
+#include "common/log.h"
 #include "common/net_util.h"
 
 #define PORT 5000
@@ -11,28 +14,38 @@
 
 int main(void)
 {
-    int fd = udp_bind(PORT, 0, 0, NULL, 0);
+    struct sockaddr_in peer;
+    socklen_t peerlen;
+    char buf[BUF_SIZE];
+    ssize_t n;
+    int fd;
+
+    fd = udp_bind(PORT, 0, 0, NULL, 0);
     if (fd < 0) {
-        perror("udp echo_server: udp_bind()");
+        log_errno("udp_bind()");
         return 1;
     }
 
-    printf("udp echo_server: listening on port %d\n", PORT);
+    log_msg("listening on port %d", PORT);
 
-    char buf[BUF_SIZE];
     while (1) {
-        struct sockaddr_in peer;
-        socklen_t peerlen = sizeof(peer);
-        ssize_t n = recvfrom(fd, buf, sizeof(buf), 0, (struct sockaddr *)&peer, &peerlen);
+        peerlen = sizeof(peer);
+        n = recvfrom(fd, buf, sizeof(buf), 0, (struct sockaddr *)&peer, &peerlen);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
             }
-            perror("udp echo_server: recvfrom()");
+            log_errno("recvfrom()");
             break;
         }
-        if (sendto(fd, buf, (size_t)n, 0, (struct sockaddr *)&peer, peerlen) < 0) {
-            perror("udp echo_server: sendto()");
+        while (1) {
+            if (sendto(fd, buf, (size_t)n, 0, (struct sockaddr *)&peer, peerlen) >= 0) {
+                break;
+            }
+            if (errno != EINTR) {
+                log_errno("sendto()");
+                break;
+            }
         }
     }
 

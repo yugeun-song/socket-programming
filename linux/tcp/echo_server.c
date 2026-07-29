@@ -1,8 +1,10 @@
-#include <stdio.h>
 #include <errno.h>
+#include <stdio.h>
 #include <unistd.h>
+
 #include <sys/socket.h>
 
+#include "common/log.h"
 #include "common/net_util.h"
 
 #define PORT 5000
@@ -11,27 +13,31 @@
 
 int main(void)
 {
-    int listen_fd = tcp_listen(PORT, BACKLOG, 0, 0, NULL, 0);
+    char buf[BUF_SIZE];
+    ssize_t n;
+    int listen_fd;
+    int client_fd;
+
+    listen_fd = tcp_listen(PORT, BACKLOG, 0, 0, NULL, 0);
     if (listen_fd < 0) {
-        perror("echo_server: tcp_listen()");
+        log_errno("tcp_listen()");
         return 1;
     }
 
-    printf("echo_server: listening on port %d\n", PORT);
+    log_msg("listening on port %d", PORT);
 
-    int client_fd = accept(listen_fd, NULL, NULL);
+    client_fd = tcp_accept(listen_fd);
     if (client_fd < 0) {
-        perror("echo_server: accept()");
+        log_errno("tcp_accept()");
         close(listen_fd);
         return 1;
     }
 
-    char buf[BUF_SIZE];
     while (1) {
-        ssize_t n = recv(client_fd, buf, sizeof(buf), 0);
+        n = recv(client_fd, buf, sizeof(buf), 0);
         if (n > 0) {
             if (send_all(client_fd, buf, (size_t)n) < 0) {
-                perror("echo_server: send()");
+                log_errno("send()");
                 break;
             }
         } else if (n == 0) {
@@ -40,7 +46,7 @@ int main(void)
             if (errno == EINTR) {
                 continue;
             }
-            perror("echo_server: recv()");
+            log_errno("recv()");
             break;
         }
     }
