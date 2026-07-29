@@ -24,10 +24,53 @@ Conventions are enforced per tree because the two toolchains differ:
   `Winsock/.clang-format` = Microsoft / Allman braces / `int* p`). clang-format resolves the
   nearest config walking upward and **cannot** branch by path within one file, so a separate
   file per tree is the only way to give each platform its own style.
+- Include order in `linux/` is enforced by `IncludeBlocks: Regroup`, not maintained by hand:
+  the file's own header, then flat `<...>` headers, `<sys/...>`, `<arpa|net|netinet/...>`,
+  `<linux/...>`, and project `"..."` last, alphabetical within each group and one blank line
+  between them. Own header first is what proves the header compiles on its own instead of
+  leaning on whatever the `.c` happened to include before it, and the groups widen from
+  portable to platform-specific. Feature test macros such as `_GNU_SOURCE` stay above the
+  whole block because they decide what the headers below will expose.
+- `Winsock/.clang-format` keeps `SortIncludes: false` deliberately. `<winsock2.h>` has to be
+  seen before `<windows.h>`, so alphabetical order would break that tree.
+
+Rules no formatter can check, applied to every source in both trees:
+
+- Prefix increment and decrement only: `++i`, never `i++`.
+- No side effects buried in a larger expression. Write `foo(); ++i;`, not `foo(i++)`, and never
+  `buf[i++]` or `*p++`. Barring a case where nothing else works, an expression reads state and a
+  statement changes it.
+- Locals are declared in one block at the top of the function body, before the first statement.
+  Only side-effect-free initializers stay on the declaration; anything that calls something is
+  assigned below.
+- One declaration per name per function. No reusing an identifier in sibling blocks and no
+  shadowing an outer name.
+- Header prototypes are packed by concern with a blank line between groups, never one blank line
+  per declaration. The grouping is what carries the information; uniform spacing carries none.
+
+Everything under `linux/` is written as if it were one thread among many and as if signals arrive
+at any moment, even where the program itself is single threaded and installs no handler:
+
+- Descriptors are created close-on-exec atomically: `SOCK_CLOEXEC`, `O_CLOEXEC`, `pipe2`, `accept4`.
+  Opening first and setting `FD_CLOEXEC` afterwards leaves a window in which another thread's
+  `fork`/`exec` inherits the descriptor.
+- Every blocking call handles `EINTR`. `tcp_accept` and `nl_send` retry internally; loops that need
+  to notice a shutdown request let `EINTR` reach them and re-test their stop flag.
+- `sigaction`, never `signal`. `signal` carries historical SysV/BSD differences, and `sigaction`
+  is where `sa_mask` and the absence of `SA_RESTART` can be stated explicitly.
+- A handler assigns to a `volatile sig_atomic_t` flag and does nothing else. `SA_RESTART` is left
+  off on purpose so the blocked `recv` returns `EINTR` and the normal cleanup path runs.
+- No mutable globals. The one exception is that stop flag. Shared counters are C11 atomics:
+  `nl_next_seq` hands out netlink sequence numbers with `atomic_fetch_add_explicit`.
+- Only thread-safe library calls: `strerror_r` not `strerror`, `inet_ntop` not `inet_ntoa`,
+  `if_indextoname` into a caller buffer.
+- `common/log.c` formats a whole line into a local buffer and emits it with one `fprintf`. Three
+  stdio calls per message would let concurrent threads interleave mid-line.
 
 ## linux/
 
-TCP and UDP echo over BSD sockets, built with a Makefile.
+TCP and UDP echo, four zero-copy transfer paths, and six netlink programs, built with a Makefile.
+Every echo and transfer server handles one connection and exits.
 
 ### build
 
@@ -42,15 +85,133 @@ make -C linux clean
 ```sh
 ./linux/bin/tcp/echo_server &
 ./linux/bin/tcp/echo_client 127.0.0.1 "hello, socket"
+
+# sendfile(2), port 5001
+./linux/bin/zerocopy/sendfile_server linux/Makefile &
+./linux/bin/zerocopy/sendfile_client 127.0.0.1
+
+# splice(2), port 5000, drop-in replacement for tcp/echo_server
+./linux/bin/zerocopy/splice_echo_server &
+./linux/bin/tcp/echo_client 127.0.0.1 "hello, splice"
+
+# MSG_ZEROCOPY sender into a TCP_ZEROCOPY_RECEIVE receiver, port 5002
+./linux/bin/zerocopy/zerocopy_recv_server &
+./linux/bin/zerocopy/msg_zerocopy_client 127.0.0.1
+
+# netlink, read-only, no privileges needed
+./linux/bin/netlink/link_dump
+./linux/bin/netlink/addr_manage list
+./linux/bin/netlink/sock_diag_dump
+./linux/bin/netlink/genl_family_list
+./linux/bin/netlink/route_monitor        # runs until SIGINT or SIGTERM
+
+# netlink, changes the running system, needs CAP_NET_ADMIN -- use a throwaway VM
+./linux/bin/netlink/addr_manage add lo 127.9.9.9/32
+./linux/bin/netlink/addr_manage del lo 127.9.9.9/32
+./linux/bin/netlink/nflog_listen 5
 ```
 
 ### layout
 
-- `common/` — shared BSD helpers: `tcp_listen`, `tcp_connect`, `udp_bind`, `udp_connect`,
-  `send_all`, `set_nonblocking`.
+- `common/net_util.{c,h}` — BSD helpers: `tcp_listen`, `tcp_connect`, `tcp_accept`, `udp_bind`,
+  `udp_connect`, `send_all`, `set_nonblocking`, `ignore_sigpipe`.
+- `common/nl_util.{c,h}` — netlink helpers: `nl_open`, `nl_join_group`, `nl_send`, `nl_recv`,
+  `nl_add_attr`, `nl_parse_attrs`, `nl_check_error`, `nl_next_seq`.
+- `common/log.{c,h}` — `log_msg` and `log_errno` write `program: function(): text` to stderr, so no
+  call site repeats its own name. Results go to stdout with `printf`; diagnostics go to stderr.
 - `tcp/` — `echo_server.c`, `echo_client.c`.
 - `udp/` — `echo_server.c`, `echo_client.c`.
+- `zerocopy/` — `sendfile_server.c`, `sendfile_client.c`, `splice_echo_server.c`,
+  `msg_zerocopy_client.c`, `zerocopy_recv_server.c`.
+- `netlink/` — `link_dump.c`, `route_monitor.c`, `addr_manage.c`, `sock_diag_dump.c`,
+  `genl_family_list.c`, `nflog_listen.c`.
 - `epoll/`, `unix_domain/` — reserved topics.
+
+### zero-copy
+
+Four kernel paths, one program each, ports 5000/5001/5002 so several can run side by side.
+
+- `sendfile_server.c` — `sendfile(2)` pushes a file straight from the page cache to the socket.
+  Takes the file path as its only argument. Under strace a 3 MiB file leaves as a single
+  `sendfile()` call with no `read()` of the payload.
+- `splice_echo_server.c` — `splice(2)` moves bytes socket → pipe → socket, so an echo never
+  touches a user buffer. It listens on 5000 and answers `tcp/echo_client` unchanged.
+- `msg_zerocopy_client.c` — `SO_ZEROCOPY` plus `send(MSG_ZEROCOPY)` hands the kernel the user
+  pages instead of copying them. Each successful `send()` consumes one notification sequence
+  number, read back from `MSG_ERRQUEUE` as an inclusive `[ee_info, ee_data]` range. The kernel
+  coalesces ranges, so 16 sends usually arrive as fewer than 16 messages.
+- `zerocopy_recv_server.c` — `mmap()` on the connected socket plus
+  `getsockopt(TCP_ZEROCOPY_RECEIVE)` maps received pages into the process instead of copying
+  them, with `madvise(MADV_DONTNEED)` releasing each batch.
+
+Three kernel behaviours the examples have to accommodate:
+
+- `TCP_ZEROCOPY_RECEIVE` never waits. An idle connection returns `length = 0` and
+  `recv_skip_hint = 0`, which is indistinguishable from a stalled sender, so it cannot be read as
+  end of stream. The real end of stream is the call failing with `EIO`. Everything the kernel
+  declines to map is reported through `recv_skip_hint` and read with an ordinary `recv()`, which
+  is also what blocks while the connection is idle.
+- Only whole pages get mapped, so the mapped share depends on how the sender laid the data out.
+  Against `msg_zerocopy_client` roughly 94% of 4 MiB arrives mapped; against a sender doing plain
+  64 KiB `send()` calls it is 0% and everything falls back to `recv()`.
+- Over loopback every `MSG_ZEROCOPY` notification comes back with `SO_EE_CODE_ZEROCOPY_COPIED`
+  set: the receive path cannot keep pinned sender pages in another socket's queue, so it copies
+  anyway. The flag is the point of the example — it is how a sender learns zero-copy did not
+  happen.
+
+`sendfile(2)` and `splice(2)` have no `MSG_NOSIGNAL`, so both servers ignore `SIGPIPE` and take
+`EPIPE` from the return value instead. Without that a peer that resets mid-transfer kills the
+process.
+
+### netlink
+
+A netlink socket is an ordinary `AF_NETLINK` socket whose peer is the kernel. The same
+`send`/`recv` apply; what changes is that a request can answer with a multipart dump terminated by
+`NLMSG_DONE`, and that a socket can also subscribe to multicast groups and receive messages nobody
+asked for. Each program here is modelled on a job some real tool already does over netlink, not on
+a feature list.
+
+- `link_dump.c` — dump the interface list with `RTM_GETLINK` and walk the attributes. This is the
+  question a capture tool asks before it can do anything else; `pcap_findalldevs` is the same
+  query, and `ifi_type` is what decides which link-layer header the caller will have to parse.
+- `route_monitor.c` — subscribe to `RTNLGRP_LINK`, the address groups and `RTNLGRP_IPV4_ROUTE`,
+  then print events as they happen. A capture or firewall daemon that runs for days needs this to
+  notice that its interface went down or that an address moved. It is also where the signal-safe
+  shutdown lives: `SIGINT`/`SIGTERM` set a flag, `recv` returns `EINTR`, the loop exits normally.
+- `sock_diag_dump.c` — `SOCK_DIAG_BY_FAMILY` with `inet_diag_req_v2`, which is what `ss` runs.
+  Needs `CONFIG_INET_DIAG`; without it the dump fails with `ENOENT` rather than the socket refusing
+  to open.
+- `genl_family_list.c` — `CTRL_CMD_GETFAMILY` against generic netlink. Every ethtool, nl80211 or
+  devlink client starts by resolving a family name to a runtime id, because generic netlink ids are
+  not fixed. `CTRL_ATTR_MCAST_GROUPS` is nested, so it also exercises attributes inside attributes.
+- `addr_manage.c` — the write direction: `RTM_NEWADDR` and `RTM_DELADDR` with `NLM_F_ACK`, and the
+  `NLMSG_ERROR` reply turned back into `errno`. This one changes the running system.
+- `nflog_listen.c` — bind an NFLOG group over `NETLINK_NETFILTER` and read packets the ruleset
+  already selected, which is the path `ulogd` takes instead of an `AF_PACKET` capture socket. The
+  kernel does the filtering; the program only reads what survived it.
+
+Details the protocol forces on the caller, all of them in `common/nl_util.c`:
+
+- Netlink is message-oriented, so a short `sendto` cannot be retried from the offset the way
+  `send_all` retries a stream. A partial write is reported as `EMSGSIZE` instead.
+- `recvfrom` uses `MSG_TRUNC`, which returns the real message length even when it did not fit, so
+  an oversized message is caught rather than silently parsed from a truncated buffer.
+- The sender is checked: any local process can address a netlink socket if it knows the port id, so
+  a message whose `nl_pid` is not 0 is rejected. Binding leaves `nl_pid` at 0 as well, letting the
+  kernel assign a unique port id; hardcoding `getpid()` breaks the moment a second netlink socket
+  exists in the process.
+- `NLMSG_OK`, `NLMSG_NEXT`, `RTA_OK` and `RTA_NEXT` decrement the length they are given, and the
+  last attribute can be shorter than its own alignment. The length variable has to be `int`; a
+  `size_t` wraps to a huge value at the tail and the walk runs off the buffer.
+- Attribute types carry `NLA_F_NESTED` in their high bits, so `nl_parse_attrs` masks with
+  `NLA_TYPE_MASK` before indexing. Without the mask every nested attribute is skipped.
+- A dump that raced with a change comes back with `NLM_F_DUMP_INTR` set and is inconsistent. The
+  dump programs report it instead of printing a half-truth.
+
+`addr_manage add`/`del` and `nflog_listen` are the two that touch kernel state, so both carry the
+warning at the top of the file and were verified under QEMU rather than on the host. The rest only
+read and were checked against `ip`, `ss` and `genl` on the host: identical interface, address and
+socket lists, and the same 26 generic netlink families.
 
 ### profiling & tracing
 
@@ -61,8 +222,20 @@ mcount-based uftrace is opt-in via `make -C linux GPROF=1`.
 
 ## Winsock/
 
-Native Winsock, developed on a Windows machine in Visual Studio 2026 (it cannot be built or
-validated from the Linux side of this repo). This repo ships only the VS-recognized style
-config — the root `.editorconfig` (`[Winsock/**]` section) and `Winsock/.clang-format`
-(Allman braces, forced braces on one-line bodies, left-aligned pointers). The solution,
-projects, and dev settings are created and maintained there.
+Native Winsock, developed on a Windows machine in Visual Studio 2026. It cannot be built or
+validated from the Linux side of this repo, so nothing here is cross-compiled or stubbed.
+
+```
+Winsock/
+|-- Winsock.slnx                     solution, x64 and x86
+|-- Common/NetUtils/                 NetStartup, ListenTcp, ConnectTcp, BindUdp, ConnectUdp,
+|                                    SendAll, SetNonBlocking, LOG_MSG, NET_PERROR
+|-- Tcp/TcpEchoServer/
+`-- Tcp/TcpEchoClient/
+```
+
+The two trees answer the same questions with each platform's own vocabulary rather than a shared
+abstraction: `tcp_listen` against `ListenTcp`, `log_errno` against `NET_PERROR`, `errno` against
+`WSAGetLastError`. Style is enforced per tree by the root `.editorconfig` (`[Winsock/**]` section)
+and `Winsock/.clang-format` (Allman braces, forced braces on one-line bodies, left-aligned
+pointers). `SortIncludes` stays off there because `<winsock2.h>` must precede `<windows.h>`.
