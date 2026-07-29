@@ -24,5 +24,18 @@ AllowShortEnumsOnASingleLine: false
 PointerAlignment: Right
 ColumnLimit: 120
 PenaltyExcessCharacter: 1
-SortIncludes: false
 Cpp11BracedListStyle: false
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeIsMainRegex: '$'
+IncludeCategories:
+    - Regex: '^<sys/'
+      Priority: 3
+    - Regex: '^<(arpa|net|netinet)/'
+      Priority: 4
+    - Regex: '^<linux/'
+      Priority: 5
+    - Regex: '^<'
+      Priority: 2
+    - Regex: '^"'
+      Priority: 6
