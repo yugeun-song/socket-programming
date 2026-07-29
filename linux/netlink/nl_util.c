@@ -1,8 +1,9 @@
 #define _GNU_SOURCE
 
-#include "common/nl_util.h"
+#include "netlink/nl_util.h"
 
 #include <errno.h>
+#include <poll.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <unistd.h>
@@ -34,6 +35,14 @@ int nl_open(int protocol)
 int nl_join_group(int fd, unsigned int group)
 {
     return setsockopt(fd, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof(group));
+}
+
+int nl_set_rcvbuf(int fd, int bytes)
+{
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVBUFFORCE, &bytes, sizeof(bytes)) == 0) {
+        return 0;
+    }
+    return setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(bytes));
 }
 
 int nl_send(int fd, const void *msg, size_t len)
@@ -79,6 +88,27 @@ ssize_t nl_recv(int fd, void *buf, size_t len)
         return -1;
     }
     return n;
+}
+
+ssize_t nl_recv_until(int fd, void *buf, size_t len, const struct deadline *dl, const sigset_t *mask)
+{
+    int ready;
+
+    if (deadline_expired(dl)) {
+        errno = ETIMEDOUT;
+        return -1;
+    }
+
+    ready = poll_until(fd, POLLIN, dl, mask);
+    if (ready < 0) {
+        return -1;
+    }
+    if (ready == 0) {
+        errno = ETIMEDOUT;
+        return -1;
+    }
+
+    return nl_recv(fd, buf, len);
 }
 
 int nl_add_attr(struct nlmsghdr *nlh, size_t cap, unsigned short type, const void *data, unsigned short len)
@@ -142,6 +172,23 @@ int nl_check_error(const struct nlmsghdr *nlh)
     }
 
     errno = -err->error;
+    return -1;
+}
+
+int nl_check_done(const struct nlmsghdr *nlh)
+{
+    int err;
+
+    if (nlh->nlmsg_len < NLMSG_LENGTH(sizeof(err))) {
+        return 0;
+    }
+
+    memcpy(&err, NLMSG_DATA(nlh), sizeof(err));
+    if (err == 0) {
+        return 0;
+    }
+
+    errno = -err;
     return -1;
 }
 

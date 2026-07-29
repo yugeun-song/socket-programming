@@ -17,9 +17,20 @@
 #include <linux/rtnetlink.h>
 
 #include "common/log.h"
-#include "common/nl_util.h"
+#include "common/net_util.h"
+#include "netlink/nl_util.h"
+
+#define RCVBUF_BYTES (1024 * 1024)
+
+struct event_counts {
+    unsigned long long links;
+    unsigned long long addrs;
+    unsigned long long routes;
+    unsigned long long overruns;
+};
 
 static volatile sig_atomic_t g_stop;
+static volatile sig_atomic_t g_report;
 
 static void on_stop(int signo)
 {
@@ -27,15 +38,10 @@ static void on_stop(int signo)
     g_stop = 1;
 }
 
-static int install_stop_handler(int signo)
+static void on_report(int signo)
 {
-    struct sigaction sa = { 0 };
-
-    sa.sa_handler = on_stop;
-    if (sigemptyset(&sa.sa_mask) < 0) {
-        return -1;
-    }
-    return sigaction(signo, &sa, NULL);
+    (void)signo;
+    g_report = 1;
 }
 
 static void print_link_event(struct nlmsghdr *nlh)
@@ -102,21 +108,40 @@ static void print_route_event(struct nlmsghdr *nlh)
 int main(void)
 {
     static const unsigned int groups[] = { RTNLGRP_LINK, RTNLGRP_IPV4_IFADDR, RTNLGRP_IPV6_IFADDR, RTNLGRP_IPV4_ROUTE };
+    static const int watched_signals[] = { SIGINT, SIGTERM, SIGUSR1 };
+    struct event_counts counts = { 0 };
     char buf[NL_BUF_SIZE];
     struct nlmsghdr *nlh;
+    struct deadline dl;
+    sigset_t saved_mask;
     size_t i;
     ssize_t n;
     int len;
     int fd;
 
-    if (install_stop_handler(SIGINT) < 0 || install_stop_handler(SIGTERM) < 0) {
-        log_errno("sigaction()");
+    if (install_signal_handler(SIGINT, on_stop, SIGNAL_INTERRUPTS) < 0 ||
+        install_signal_handler(SIGTERM, on_stop, SIGNAL_INTERRUPTS) < 0) {
+        log_errno("sigaction(stop)");
+        return 1;
+    }
+    if (install_signal_handler(SIGUSR1, on_report, SIGNAL_RESTARTS) < 0) {
+        log_errno("sigaction(SIGUSR1)");
+        return 1;
+    }
+    if (block_signals(watched_signals, sizeof(watched_signals) / sizeof(watched_signals[0]), &saved_mask) < 0) {
+        log_errno("pthread_sigmask()");
         return 1;
     }
 
     fd = nl_open(NETLINK_ROUTE);
     if (fd < 0) {
         log_errno("nl_open()");
+        return 1;
+    }
+
+    if (nl_set_rcvbuf(fd, RCVBUF_BYTES) < 0) {
+        log_errno("setsockopt(SO_RCVBUF)");
+        close(fd);
         return 1;
     }
 
@@ -130,10 +155,27 @@ int main(void)
 
     log_msg("watching link, address and IPv4 route events");
 
+    if (deadline_start(&dl, DEADLINE_FOREVER) < 0) {
+        log_errno("clock_gettime()");
+        close(fd);
+        return 1;
+    }
+
     while (!g_stop) {
-        n = nl_recv(fd, buf, sizeof(buf));
+        if (g_report) {
+            g_report = 0;
+            log_msg("%llu link, %llu address, %llu route events, %llu overruns so far", counts.links, counts.addrs,
+                    counts.routes, counts.overruns);
+        }
+
+        n = nl_recv_until(fd, buf, sizeof(buf), &dl, &saved_mask);
         if (n < 0) {
             if (errno == EINTR) {
+                continue;
+            }
+            if (errno == ENOBUFS) {
+                counts.overruns += 1;
+                log_msg("the kernel dropped events, this socket overflowed");
                 continue;
             }
             log_errno("nl_recv()");
@@ -149,14 +191,17 @@ int main(void)
             case RTM_NEWLINK:
             case RTM_DELLINK:
                 print_link_event(nlh);
+                counts.links += 1;
                 break;
             case RTM_NEWADDR:
             case RTM_DELADDR:
                 print_addr_event(nlh);
+                counts.addrs += 1;
                 break;
             case RTM_NEWROUTE:
             case RTM_DELROUTE:
                 print_route_event(nlh);
+                counts.routes += 1;
                 break;
             default:
                 break;

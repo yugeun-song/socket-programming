@@ -26,7 +26,20 @@
 #include <linux/rtnetlink.h>
 
 #include "common/log.h"
-#include "common/nl_util.h"
+#include "netlink/nl_util.h"
+
+#define DUMP_TIMEOUT_MS 5000
+#define ACK_TIMEOUT_MS 5000
+
+struct addr_request {
+    struct nlmsghdr nlh;
+    struct ifaddrmsg ifa;
+};
+
+union addr_change {
+    struct nlmsghdr nlh;
+    char raw[NLMSG_SPACE(sizeof(struct ifaddrmsg)) + 2 * RTA_SPACE(sizeof(struct in_addr))];
+};
 
 static void usage(const char *argv0)
 {
@@ -99,15 +112,13 @@ static void print_addr(struct nlmsghdr *nlh)
 
 static int list_addrs(int fd)
 {
-    struct {
-        struct nlmsghdr nlh;
-        struct ifaddrmsg ifa;
-    } req = { 0 };
+    struct addr_request req = { 0 };
     char buf[NL_BUF_SIZE];
     struct nlmsghdr *nlh;
+    struct deadline dl;
     unsigned int seq;
     ssize_t n;
-    int done = 0;
+    int is_done = 0;
     int len;
 
     seq = nl_next_seq();
@@ -121,8 +132,12 @@ static int list_addrs(int fd)
         return -1;
     }
 
-    while (!done) {
-        n = nl_recv(fd, buf, sizeof(buf));
+    if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
+        return -1;
+    }
+
+    while (!is_done) {
+        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -139,7 +154,10 @@ static int list_addrs(int fd)
                 continue;
             }
             if (nlh->nlmsg_type == NLMSG_DONE) {
-                done = 1;
+                if (nl_check_done(nlh) < 0) {
+                    return -1;
+                }
+                is_done = 1;
                 break;
             }
             if (nl_check_error(nlh) < 0) {
@@ -158,13 +176,11 @@ static int list_addrs(int fd)
 static int change_addr(int fd, unsigned short type, unsigned short extra_flags, unsigned int ifindex,
                        const struct in_addr *ip, unsigned char prefix)
 {
-    union {
-        struct nlmsghdr nlh;
-        char raw[NLMSG_SPACE(sizeof(struct ifaddrmsg)) + 2 * RTA_SPACE(sizeof(struct in_addr))];
-    } req;
+    union addr_change req;
     char buf[NL_BUF_SIZE];
     struct ifaddrmsg *ifa;
     struct nlmsghdr *nlh;
+    struct deadline dl;
     unsigned int seq;
     ssize_t n;
     int len;
@@ -194,8 +210,12 @@ static int change_addr(int fd, unsigned short type, unsigned short extra_flags, 
         return -1;
     }
 
+    if (deadline_start(&dl, ACK_TIMEOUT_MS) < 0) {
+        return -1;
+    }
+
     while (1) {
-        n = nl_recv(fd, buf, sizeof(buf));
+        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -222,7 +242,7 @@ int main(int argc, char **argv)
     unsigned char prefix = 0;
     unsigned int ifindex = 0;
     struct in_addr ip = { 0 };
-    int listing = 0;
+    int is_listing = 0;
     int rc;
     int fd;
 
@@ -232,7 +252,7 @@ int main(int argc, char **argv)
     }
 
     if (strcmp(argv[1], "list") == 0) {
-        listing = 1;
+        is_listing = 1;
     } else if (strcmp(argv[1], "add") == 0) {
         type = RTM_NEWADDR;
         extra_flags = NLM_F_CREATE | NLM_F_EXCL;
@@ -243,7 +263,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (!listing) {
+    if (!is_listing) {
         if (argc < 4) {
             usage(argv[0]);
             return 1;
@@ -265,7 +285,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (listing) {
+    if (is_listing) {
         rc = list_addrs(fd);
         if (rc < 0) {
             log_errno("RTM_GETADDR");

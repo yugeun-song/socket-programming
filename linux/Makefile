@@ -13,10 +13,12 @@ BIN_DIR  = bin
 LIB_DIRS = common
 SRC_DIRS = tcp udp zerocopy netlink epoll unix_domain
 
-LIB_SRCS = $(wildcard $(addsuffix /*.c,$(LIB_DIRS)))
+TOPIC_LIB_SRCS = netlink/nl_util.c
+
+LIB_SRCS = $(wildcard $(addsuffix /*.c,$(LIB_DIRS))) $(TOPIC_LIB_SRCS)
 LIB_OBJS = $(patsubst %.c,$(BIN_DIR)/%.o,$(LIB_SRCS))
 
-EXE_SRCS = $(wildcard $(addsuffix /*.c,$(SRC_DIRS)))
+EXE_SRCS = $(filter-out $(TOPIC_LIB_SRCS),$(wildcard $(addsuffix /*.c,$(SRC_DIRS))))
 EXES     = $(patsubst %.c,$(BIN_DIR)/%,$(EXE_SRCS))
 
 SYMBOL_SRCS = $(wildcard $(addsuffix /*.c,$(LIB_DIRS) $(SRC_DIRS)) \

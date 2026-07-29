@@ -16,7 +16,14 @@
 #include <linux/rtnetlink.h>
 
 #include "common/log.h"
-#include "common/nl_util.h"
+#include "netlink/nl_util.h"
+
+#define DUMP_TIMEOUT_MS 5000
+
+union link_request {
+    struct nlmsghdr nlh;
+    char raw[NLMSG_SPACE(sizeof(struct ifinfomsg)) + RTA_SPACE(sizeof(unsigned int))];
+};
 
 static const char *link_type(unsigned short type)
 {
@@ -71,16 +78,16 @@ static void print_link(struct nlmsghdr *nlh)
 
 int main(void)
 {
-    struct {
-        struct nlmsghdr nlh;
-        struct ifinfomsg ifi;
-    } req = { 0 };
+    unsigned int ext_mask = RTEXT_FILTER_VF;
+    union link_request req;
     char buf[NL_BUF_SIZE];
+    struct ifinfomsg *ifi;
     struct nlmsghdr *nlh;
+    struct deadline dl;
     unsigned int seq;
     unsigned int links = 0;
     ssize_t n;
-    int done = 0;
+    int is_done = 0;
     int len;
     int fd;
 
@@ -90,12 +97,22 @@ int main(void)
         return 1;
     }
 
+    memset(&req, 0, sizeof(req));
+
     seq = nl_next_seq();
-    req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(req.ifi));
+    req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(*ifi));
     req.nlh.nlmsg_type = RTM_GETLINK;
     req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
     req.nlh.nlmsg_seq = seq;
-    req.ifi.ifi_family = AF_UNSPEC;
+
+    ifi = (struct ifinfomsg *)NLMSG_DATA(&req.nlh);
+    ifi->ifi_family = AF_UNSPEC;
+
+    if (nl_add_attr(&req.nlh, sizeof(req), IFLA_EXT_MASK, &ext_mask, sizeof(ext_mask)) < 0) {
+        log_errno("nl_add_attr(IFLA_EXT_MASK)");
+        close(fd);
+        return 1;
+    }
 
     if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
         log_errno("nl_send()");
@@ -103,8 +120,14 @@ int main(void)
         return 1;
     }
 
-    while (!done) {
-        n = nl_recv(fd, buf, sizeof(buf));
+    if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
+        log_errno("clock_gettime()");
+        close(fd);
+        return 1;
+    }
+
+    while (!is_done) {
+        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -128,7 +151,12 @@ int main(void)
                 return 1;
             }
             if (nlh->nlmsg_type == NLMSG_DONE) {
-                done = 1;
+                if (nl_check_done(nlh) < 0) {
+                    log_errno("RTM_GETLINK");
+                    close(fd);
+                    return 1;
+                }
+                is_done = 1;
                 break;
             }
             if (nl_check_error(nlh) < 0) {

@@ -13,6 +13,7 @@
 
 #include <linux/errqueue.h>
 
+#include "common/deadline.h"
 #include "common/log.h"
 #include "common/net_util.h"
 
@@ -21,34 +22,35 @@
 #define CHUNK_COUNT 16
 #define DRAIN_TIMEOUT_MS 2000
 
+union zc_control {
+    char raw[CMSG_SPACE(sizeof(struct sock_extended_err) + sizeof(struct sockaddr_in))];
+    struct cmsghdr align;
+};
+
 struct zc_stats {
     unsigned int completed;
     unsigned int copied;
 };
 
-static int drain_completions(int fd, int timeout_ms, struct zc_stats *stats)
+static int drain_completions(int fd, const struct deadline *dl, struct zc_stats *stats)
 {
-    union {
-        char raw[CMSG_SPACE(sizeof(struct sock_extended_err) + sizeof(struct sockaddr_in))];
-        struct cmsghdr align;
-    } control;
     struct sock_extended_err serr;
-    struct pollfd pfd = { 0 };
     struct msghdr msg = { 0 };
+    union zc_control control;
     struct cmsghdr *cmsg;
     unsigned int range;
     int ready;
 
-    pfd.fd = fd;
-    pfd.events = POLLERR;
-
     while (1) {
-        ready = poll(&pfd, 1, timeout_ms);
+        ready = poll_until(fd, POLLERR, dl, NULL);
         if (ready >= 0) {
             break;
         }
         if (errno != EINTR) {
             return -1;
+        }
+        if (deadline_expired(dl)) {
+            return 0;
         }
     }
     if (ready == 0) {
@@ -96,7 +98,9 @@ int main(int argc, char **argv)
     struct zc_stats stats = { 0 };
     unsigned long long sent = 0;
     unsigned int pending = 0;
-    int failed = 0;
+    struct deadline probe_dl;
+    struct deadline drain_dl;
+    int has_failed = 0;
     int enable = 1;
     char *chunk;
     size_t off;
@@ -112,6 +116,12 @@ int main(int argc, char **argv)
     }
     memset(chunk, 'z', CHUNK_SIZE);
 
+    if (deadline_start(&probe_dl, 0) < 0) {
+        log_errno("clock_gettime()");
+        free(chunk);
+        return 1;
+    }
+
     fd = tcp_connect(host, PORT);
     if (fd < 0) {
         log_errno("tcp_connect()");
@@ -126,7 +136,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    for (i = 0; i < CHUNK_COUNT && !failed; ++i) {
+    for (i = 0; i < CHUNK_COUNT && !has_failed; ++i) {
         off = 0;
         while (off < CHUNK_SIZE) {
             n = send(fd, chunk + off, CHUNK_SIZE - off, MSG_ZEROCOPY | MSG_NOSIGNAL);
@@ -135,7 +145,7 @@ int main(int argc, char **argv)
                     continue;
                 }
                 log_errno("send()");
-                failed = 1;
+                has_failed = 1;
                 break;
             }
             off += (size_t)n;
@@ -143,14 +153,21 @@ int main(int argc, char **argv)
         }
         sent += off;
 
-        if (drain_completions(fd, 0, &stats) < 0) {
+        if (drain_completions(fd, &probe_dl, &stats) < 0) {
             log_errno("recvmsg(MSG_ERRQUEUE)");
-            failed = 1;
+            has_failed = 1;
         }
     }
 
+    if (deadline_start(&drain_dl, DRAIN_TIMEOUT_MS) < 0) {
+        log_errno("clock_gettime()");
+        close(fd);
+        free(chunk);
+        return 1;
+    }
+
     while (stats.completed < pending) {
-        drained = drain_completions(fd, DRAIN_TIMEOUT_MS, &stats);
+        drained = drain_completions(fd, &drain_dl, &stats);
         if (drained < 0) {
             log_errno("recvmsg(MSG_ERRQUEUE)");
             break;
@@ -166,5 +183,5 @@ int main(int argc, char **argv)
 
     close(fd);
     free(chunk);
-    return failed ? 1 : 0;
+    return has_failed ? 1 : 0;
 }

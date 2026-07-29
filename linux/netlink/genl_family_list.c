@@ -9,7 +9,14 @@
 #include <linux/netlink.h>
 
 #include "common/log.h"
-#include "common/nl_util.h"
+#include "netlink/nl_util.h"
+
+#define DUMP_TIMEOUT_MS 5000
+
+struct genl_request {
+    struct nlmsghdr nlh;
+    struct genlmsghdr genl;
+};
 
 static unsigned int count_nested(struct rtattr *nest)
 {
@@ -60,16 +67,14 @@ static void print_family(struct nlmsghdr *nlh)
 
 int main(void)
 {
-    struct {
-        struct nlmsghdr nlh;
-        struct genlmsghdr genl;
-    } req = { 0 };
+    struct genl_request req = { 0 };
     char buf[NL_BUF_SIZE];
     struct nlmsghdr *nlh;
+    struct deadline dl;
     unsigned int seq;
     unsigned int families = 0;
     ssize_t n;
-    int done = 0;
+    int is_done = 0;
     int len;
     int fd;
 
@@ -93,8 +98,14 @@ int main(void)
         return 1;
     }
 
-    while (!done) {
-        n = nl_recv(fd, buf, sizeof(buf));
+    if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
+        log_errno("clock_gettime()");
+        close(fd);
+        return 1;
+    }
+
+    while (!is_done) {
+        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -118,7 +129,12 @@ int main(void)
                 return 1;
             }
             if (nlh->nlmsg_type == NLMSG_DONE) {
-                done = 1;
+                if (nl_check_done(nlh) < 0) {
+                    log_errno("CTRL_CMD_GETFAMILY");
+                    close(fd);
+                    return 1;
+                }
+                is_done = 1;
                 break;
             }
             if (nl_check_error(nlh) < 0) {

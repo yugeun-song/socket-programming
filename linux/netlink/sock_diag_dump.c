@@ -12,11 +12,18 @@
 #include <linux/sock_diag.h>
 
 #include "common/log.h"
-#include "common/nl_util.h"
+#include "netlink/nl_util.h"
 
-static const char *const state_names[] = { "?",         "ESTABLISHED", "SYN_SENT",    "SYN_RECV",   "FIN_WAIT1",
-                                           "FIN_WAIT2", "TIME_WAIT",   "CLOSE",       "CLOSE_WAIT", "LAST_ACK",
-                                           "LISTEN",    "CLOSING",     "NEW_SYN_RECV" };
+static const char *const state_names[13] = { "?",         "ESTABLISHED", "SYN_SENT",    "SYN_RECV",   "FIN_WAIT1",
+                                             "FIN_WAIT2", "TIME_WAIT",   "CLOSE",       "CLOSE_WAIT", "LAST_ACK",
+                                             "LISTEN",    "CLOSING",     "NEW_SYN_RECV" };
+
+#define DUMP_TIMEOUT_MS 5000
+
+struct diag_request {
+    struct nlmsghdr nlh;
+    struct inet_diag_req_v2 diag;
+};
 
 static void print_socket(struct nlmsghdr *nlh)
 {
@@ -46,16 +53,14 @@ static void print_socket(struct nlmsghdr *nlh)
 
 int main(void)
 {
-    struct {
-        struct nlmsghdr nlh;
-        struct inet_diag_req_v2 diag;
-    } req = { 0 };
+    struct diag_request req = { 0 };
     char buf[NL_BUF_SIZE];
     struct nlmsghdr *nlh;
+    struct deadline dl;
     unsigned int seq;
     unsigned int sockets = 0;
     ssize_t n;
-    int done = 0;
+    int is_done = 0;
     int len;
     int fd;
 
@@ -80,8 +85,14 @@ int main(void)
         return 1;
     }
 
-    while (!done) {
-        n = nl_recv(fd, buf, sizeof(buf));
+    if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
+        log_errno("clock_gettime()");
+        close(fd);
+        return 1;
+    }
+
+    while (!is_done) {
+        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -105,7 +116,12 @@ int main(void)
                 return 1;
             }
             if (nlh->nlmsg_type == NLMSG_DONE) {
-                done = 1;
+                if (nl_check_done(nlh) < 0) {
+                    log_errno("SOCK_DIAG_BY_FAMILY");
+                    close(fd);
+                    return 1;
+                }
+                is_done = 1;
                 break;
             }
             if (nl_check_error(nlh) < 0) {

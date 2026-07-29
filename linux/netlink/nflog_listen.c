@@ -26,17 +26,23 @@
 #include <net/ethernet.h>
 #include <netinet/in.h>
 
-#include <linux/netfilter.h>
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter/nfnetlink_log.h>
 #include <linux/netlink.h>
 
 #include "common/log.h"
-#include "common/nl_util.h"
+#include "common/net_util.h"
+#include "netlink/nl_util.h"
 
 #define DEFAULT_GROUP 5
-#define COPY_RANGE 0xffff
+#define COPY_RANGE 4096
 #define IPV4_MIN_HDR 20
+#define ACK_TIMEOUT_MS 5000
+
+union nflog_config {
+    struct nlmsghdr nlh;
+    char raw[NLMSG_SPACE(sizeof(struct nfgenmsg)) + RTA_SPACE(sizeof(struct nfulnl_msg_config_mode))];
+};
 
 static volatile sig_atomic_t g_stop;
 
@@ -46,26 +52,13 @@ static void on_stop(int signo)
     g_stop = 1;
 }
 
-static int install_stop_handler(int signo)
-{
-    struct sigaction sa = { 0 };
-
-    sa.sa_handler = on_stop;
-    if (sigemptyset(&sa.sa_mask) < 0) {
-        return -1;
-    }
-    return sigaction(signo, &sa, NULL);
-}
-
 static int nfl_config(int fd, unsigned short group, unsigned short attr, const void *data, unsigned short len)
 {
-    union {
-        struct nlmsghdr nlh;
-        char raw[NLMSG_SPACE(sizeof(struct nfgenmsg)) + RTA_SPACE(sizeof(struct nfulnl_msg_config_mode))];
-    } req;
+    union nflog_config req;
     char buf[NL_BUF_SIZE];
     struct nfgenmsg *nfg;
     struct nlmsghdr *nlh;
+    struct deadline dl;
     unsigned int seq;
     ssize_t n;
     int left;
@@ -90,8 +83,12 @@ static int nfl_config(int fd, unsigned short group, unsigned short attr, const v
         return -1;
     }
 
+    if (deadline_start(&dl, ACK_TIMEOUT_MS) < 0) {
+        return -1;
+    }
+
     while (1) {
-        n = nl_recv(fd, buf, sizeof(buf));
+        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -154,11 +151,14 @@ static void print_packet(struct nlmsghdr *nlh)
 
 int main(int argc, char **argv)
 {
+    static const int stop_signals[] = { SIGINT, SIGTERM };
     struct nfulnl_msg_config_mode mode = { 0 };
     struct nfulnl_msg_config_cmd cmd = { 0 };
     unsigned short group = DEFAULT_GROUP;
     char buf[NL_BUF_SIZE];
     struct nlmsghdr *nlh;
+    struct deadline wait_dl;
+    sigset_t saved_mask;
     unsigned long parsed;
     char *endptr;
     ssize_t n;
@@ -175,8 +175,13 @@ int main(int argc, char **argv)
         group = (unsigned short)parsed;
     }
 
-    if (install_stop_handler(SIGINT) < 0 || install_stop_handler(SIGTERM) < 0) {
+    if (install_signal_handler(SIGINT, on_stop, SIGNAL_INTERRUPTS) < 0 ||
+        install_signal_handler(SIGTERM, on_stop, SIGNAL_INTERRUPTS) < 0) {
         log_errno("sigaction()");
+        return 1;
+    }
+    if (block_signals(stop_signals, sizeof(stop_signals) / sizeof(stop_signals[0]), &saved_mask) < 0) {
+        log_errno("pthread_sigmask()");
         return 1;
     }
 
@@ -210,10 +215,20 @@ int main(int argc, char **argv)
 
     log_msg("bound to nflog group %u", group);
 
+    if (deadline_start(&wait_dl, DEADLINE_FOREVER) < 0) {
+        log_errno("clock_gettime()");
+        close(fd);
+        return 1;
+    }
+
     while (!g_stop) {
-        n = nl_recv(fd, buf, sizeof(buf));
+        n = nl_recv_until(fd, buf, sizeof(buf), &wait_dl, &saved_mask);
         if (n < 0) {
             if (errno == EINTR) {
+                continue;
+            }
+            if (errno == ENOBUFS) {
+                log_msg("the kernel dropped packets, this socket overflowed");
                 continue;
             }
             log_errno("nl_recv()");
