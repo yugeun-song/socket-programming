@@ -43,11 +43,12 @@ static const char *link_type(unsigned short type)
 static void print_link(struct nlmsghdr *nlh)
 {
     struct rtattr *tb[IFLA_MAX + 1];
+    char hwaddr[32] = { 0 };
     const unsigned char *mac;
     struct ifinfomsg *ifi;
     const char *name = "?";
     unsigned int mtu = 0;
-    int i;
+    char line[256];
 
     ifi = (struct ifinfomsg *)NLMSG_DATA(nlh);
     nl_parse_attrs(IFLA_RTA(ifi), (int)IFLA_PAYLOAD(nlh), tb, IFLA_MAX);
@@ -58,22 +59,14 @@ static void print_link(struct nlmsghdr *nlh)
     if (tb[IFLA_MTU] != NULL) {
         memcpy(&mtu, RTA_DATA(tb[IFLA_MTU]), sizeof(mtu));
     }
-
-    printf("link_dump: %2d %-10s %-9s mtu %-6u %s", ifi->ifi_index, name, link_type(ifi->ifi_type), mtu,
-           (ifi->ifi_flags & IFF_UP) ? "UP" : "DOWN");
-    if (ifi->ifi_flags & IFF_RUNNING) {
-        printf(",RUNNING");
-    }
-
     if (tb[IFLA_ADDRESS] != NULL && RTA_PAYLOAD(tb[IFLA_ADDRESS]) == ETH_ALEN) {
         mac = (const unsigned char *)RTA_DATA(tb[IFLA_ADDRESS]);
-        printf(" mac %02x", mac[0]);
-        for (i = 1; i < ETH_ALEN; ++i) {
-            printf(":%02x", mac[i]);
-        }
+        snprintf(hwaddr, sizeof(hwaddr), " mac %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
 
-    printf("\n");
+    snprintf(line, sizeof(line), "link_dump: %2d %-10s %-9s mtu %-6u %s%s%s", ifi->ifi_index, name, link_type(ifi->ifi_type),
+             mtu, (ifi->ifi_flags & IFF_UP) ? "UP" : "DOWN", (ifi->ifi_flags & IFF_RUNNING) ? ",RUNNING" : "", hwaddr);
+    printf("%s\n", line);
 }
 
 int main(void)

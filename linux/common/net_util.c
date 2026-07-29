@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -50,6 +51,36 @@ static inline int bind_inet(int type, unsigned short port, int level, int optnam
     return fd;
 }
 
+static int wait_connected(int fd)
+{
+    struct pollfd pfd = { 0 };
+    socklen_t errlen = sizeof(int);
+    int err = 0;
+    int ready;
+
+    pfd.fd = fd;
+    pfd.events = POLLOUT;
+
+    while (1) {
+        ready = poll(&pfd, 1, -1);
+        if (ready >= 0) {
+            break;
+        }
+        if (errno != EINTR) {
+            return -1;
+        }
+    }
+
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen) < 0) {
+        return -1;
+    }
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+    return 0;
+}
+
 static inline int connect_inet(int type, const char *host, unsigned short port)
 {
     struct sockaddr_in addr = { 0 };
@@ -70,10 +101,12 @@ static inline int connect_inet(int type, const char *host, unsigned short port)
     }
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        saved_errno = errno;
-        close(fd);
-        errno = saved_errno;
-        return -1;
+        if (errno != EINTR || wait_connected(fd) < 0) {
+            saved_errno = errno;
+            close(fd);
+            errno = saved_errno;
+            return -1;
+        }
     }
 
     return fd;

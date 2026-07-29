@@ -25,7 +25,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (send(fd, message, strlen(message), 0) < 0) {
+    if (send_all(fd, message, strlen(message)) < 0) {
         log_errno("send()");
         close(fd);
         return 1;
