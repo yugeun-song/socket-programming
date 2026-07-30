@@ -70,6 +70,10 @@ at any moment, even where the program itself is single threaded and installs no 
   is where `sa_mask` and `SA_RESTART` can be stated explicitly. `install_signal_handler` takes the
   flag as an argument named at the call site — `SIGNAL_INTERRUPTS` or `SIGNAL_RESTARTS` — because
   the choice belongs to the signal's purpose and not to a house default.
+- A signal handler stores the signal number it was given, so nothing has to be silenced. A callback
+  signature the caller does not choose still hands over a parameter, and the answer is to use it
+  rather than to write around the compiler: `stop_signal()` then tells the program whether `SIGINT`
+  or `SIGTERM` ended it, and the shutdown line says which. No `(void)` cast, no unused attribute.
 - A handler assigns to a `volatile sig_atomic_t` flag and does nothing else. Which flag it is decides
   whether `SA_RESTART` belongs: a stop signal must interrupt the wait, so `route_monitor` installs
   `SIGINT` and `SIGTERM` with `SIGNAL_INTERRUPTS`; its `SIGUSR1` counter report must not tear the
@@ -181,8 +185,10 @@ cscope -dL -3 wait_ready       # who calls it
   mask: `tcp_listen`, `tcp_connect`, `tcp_accept`, `udp_bind`, `udp_connect`, `wait_ready`,
   `recv_until`, `recvfrom_until`, `send_all_until`, `set_nonblocking`. `format_addr` and
   `format_peer` render a peer as `address:port`. `ignore_sigpipe`, `install_signal_handler`,
-  `install_stop_handlers`, `block_signals` and `stop_requested` cover the signal side; a stop request
-  surfaces as `ECANCELED` out of any wait, so shutdown travels the same path as an error.
+  `install_stop_handlers`, `block_signals`, `stop_requested` and `stop_signal` cover the signal side.
+  A stop request surfaces as `ECANCELED` out of any wait, so shutdown travels the wait's existing
+  error path; every server then separates it from a real failure, reports which signal arrived, and
+  exits 0 rather than announcing a cancelled read as a fault.
 - `common/deadline.{c,h}` — absolute monotonic deadlines: `deadline_start`, `deadline_left_ms`,
   `deadline_expired`, `poll_until`.
 - `common/log.{c,h}` — `LOG_MSG` and `LOG_ERRNO` write `program: function(): text` to stderr, so no
