@@ -19,7 +19,7 @@ int deadline_start(struct deadline *dl, int timeout_ms)
         return 0;
     }
 
-    if (clock_gettime(CLOCK_MONOTONIC, &dl->at) < 0) {
+    if (clock_gettime(CLOCK_MONOTONIC, &(dl->at)) < 0) {
         return -1;
     }
 
