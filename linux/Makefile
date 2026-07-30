@@ -3,6 +3,8 @@ CFLAGS  = -std=c11 -Wall -Wextra -pedantic -ggdb3 -Og \
           -fno-omit-frame-pointer -fno-optimize-sibling-calls \
           -fasynchronous-unwind-tables -I.
 LDFLAGS = -pthread
+CTAGS   = ctags
+CSCOPE  = cscope
 
 ifdef GPROF
 CFLAGS  += -pg
@@ -36,11 +38,13 @@ $(BIN_DIR)/%: %.c $(LIB_OBJS)
 	$(CC) $(CFLAGS) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
 
 tags:
-	ctags -f tags $(SYMBOL_SRCS)
+	$(CTAGS) -f tags $(SYMBOL_SRCS)
 
-cscope:
-	printf '%s\n' $(SYMBOL_SRCS) > cscope.files
-	cscope -bq -i cscope.files
+cscope.files: $(SYMBOL_SRCS)
+	printf '%s\n' $(SYMBOL_SRCS) > $@
+
+cscope: cscope.files
+	$(CSCOPE) -bkq -i cscope.files
 
 symbols: tags cscope
 
