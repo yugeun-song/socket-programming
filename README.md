@@ -47,6 +47,13 @@ Rules no formatter can check, applied to every source in both trees:
   shadowing an outer name.
 - Header prototypes are packed by concern with a blank line between groups, never one blank line
   per declaration. The grouping is what carries the information; uniform spacing carries none.
+- Macro names are upper case, always. `LOG_MSG` and `LOG_ERRNO` look like the function calls they
+  are not, unless the case says otherwise; the reader needs to know that `__func__` appears out of
+  nowhere and that an argument may be evaluated more than once.
+- A function that fills a struct assigns every field before any early return, including the return
+  that means "nothing to compute". `deadline_start` takes that exit for `DEADLINE_FOREVER`; with the
+  assignment sitting below it the caller got a stack-garbage deadline, and a server waiting forever
+  either waited 24 days or gave up instantly depending on what the stack happened to hold.
 - Whoever receives says who sent. Every program that reads from a socket prints the peer as
   `address:port`, so a reply is evidence of a specific exchange rather than a hopeful echo. The
   netlink programs are exempt: their peer is always the kernel.
@@ -116,7 +123,25 @@ Every echo and transfer server handles one connection and exits.
 ```sh
 make -C linux            # binaries at linux/bin/<topic>/<name>
 make -C linux GPROF=1    # add -pg for gprof / mcount-based uftrace
-make -C linux clean
+make -C linux symbols    # ctags tags + cscope index over every .c and .h
+make -C linux tags       # ctags only
+make -C linux cscope     # cscope only
+make -C linux clean      # also removes tags, cscope.* and bin/
+```
+
+`linux/.ctags.d/linux.ctags` holds the ctags settings, so an editor that invokes ctags
+itself indexes the tree the same way `make tags` does. Two of its lines carry the weight:
+`--langmap=C:.c.h` because Universal Ctags maps `.h` to C++ by default, which combined with
+`--languages=C` would silently skip every header and with it every macro and prototype, and
+`--extras=+q` for qualified tags so `deadline::timeout_ms` is reachable rather than just
+`timeout_ms`. The result is 239 tags: functions, prototypes, macros with their signatures,
+struct and union members with their types. `cscope -bkq` skips `/usr/include`, so a query
+answers about this tree instead of libc.
+
+```sh
+cd linux
+cscope -dL -1 nl_recv_until    # where is it defined
+cscope -dL -3 wait_ready       # who calls it
 ```
 
 ### run
@@ -160,7 +185,7 @@ make -C linux clean
   surfaces as `ECANCELED` out of any wait, so shutdown travels the same path as an error.
 - `common/deadline.{c,h}` — absolute monotonic deadlines: `deadline_start`, `deadline_left_ms`,
   `deadline_expired`, `poll_until`.
-- `common/log.{c,h}` — `log_msg` and `log_errno` write `program: function(): text` to stderr, so no
+- `common/log.{c,h}` — `LOG_MSG` and `LOG_ERRNO` write `program: function(): text` to stderr, so no
   call site repeats its own name. Results go to stdout with `printf`; diagnostics go to stderr.
 - `netlink/nl_util.{c,h}` — netlink helpers: `nl_open`, `nl_join_group`, `nl_send`, `nl_recv`,
   `nl_recv_until`, `nl_add_attr`, `nl_parse_attrs`, `nl_check_error`, `nl_next_seq`. It sits beside
@@ -305,7 +330,7 @@ Winsock/
 ```
 
 The two trees answer the same questions with each platform's own vocabulary rather than a shared
-abstraction: `tcp_listen` against `ListenTcp`, `log_errno` against `NET_PERROR`, `errno` against
+abstraction: `tcp_listen` against `ListenTcp`, `LOG_ERRNO` against `NET_PERROR`, `errno` against
 `WSAGetLastError`. Style is enforced per tree by the root `.editorconfig` (`[Winsock/**]` section)
 and `Winsock/.clang-format` (Allman braces, forced braces on one-line bodies, left-aligned
 pointers). `SortIncludes` stays off there because `<winsock2.h>` must precede `<windows.h>`.
