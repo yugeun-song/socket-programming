@@ -29,17 +29,11 @@ struct event_counts {
     unsigned long long overruns;
 };
 
-static volatile sig_atomic_t g_stop;
-static volatile sig_atomic_t g_report;
+static volatile sig_atomic_t g_report_signal;
 
-static void on_stop(int signo __attribute__((unused)))
+static void on_report(int signo)
 {
-    g_stop = 1;
-}
-
-static void on_report(int signo __attribute__((unused)))
-{
-    g_report = 1;
+    g_report_signal = signo;
 }
 
 static void print_link_event(struct nlmsghdr *nlh)
@@ -106,7 +100,7 @@ static void print_route_event(struct nlmsghdr *nlh)
 int main(void)
 {
     static const unsigned int groups[] = { RTNLGRP_LINK, RTNLGRP_IPV4_IFADDR, RTNLGRP_IPV6_IFADDR, RTNLGRP_IPV4_ROUTE };
-    static const int watched_signals[] = { SIGINT, SIGTERM, SIGUSR1 };
+    static const int report_signals[] = { SIGUSR1 };
     struct event_counts counts = { 0 };
     char buf[NL_BUF_SIZE];
     struct nlmsghdr *nlh;
@@ -114,19 +108,19 @@ int main(void)
     sigset_t saved_mask;
     size_t i;
     ssize_t n;
+    int report;
     int len;
     int fd;
 
-    if (install_signal_handler(SIGINT, on_stop, SIGNAL_INTERRUPTS) < 0 ||
-        install_signal_handler(SIGTERM, on_stop, SIGNAL_INTERRUPTS) < 0) {
-        LOG_ERRNO("sigaction(stop)");
+    if (install_stop_handlers(&saved_mask) < 0) {
+        LOG_ERRNO("install_stop_handlers()");
         return 1;
     }
     if (install_signal_handler(SIGUSR1, on_report, SIGNAL_RESTARTS) < 0) {
         LOG_ERRNO("sigaction(SIGUSR1)");
         return 1;
     }
-    if (block_signals(watched_signals, sizeof(watched_signals) / sizeof(watched_signals[0]), &saved_mask) < 0) {
+    if (block_signals(report_signals, sizeof(report_signals) / sizeof(report_signals[0]), NULL) < 0) {
         LOG_ERRNO("pthread_sigmask()");
         return 1;
     }
@@ -159,11 +153,12 @@ int main(void)
         return 1;
     }
 
-    while (!g_stop) {
-        if (g_report) {
-            g_report = 0;
-            LOG_MSG("%llu link, %llu address, %llu route events, %llu overruns so far", counts.links, counts.addrs,
-                    counts.routes, counts.overruns);
+    while (!stop_requested()) {
+        report = (int)g_report_signal;
+        if (report != 0) {
+            g_report_signal = 0;
+            LOG_MSG("signal %d: %llu link, %llu address, %llu route events, %llu overruns so far", report, counts.links,
+                    counts.addrs, counts.routes, counts.overruns);
         }
 
         n = nl_recv_until(fd, buf, sizeof(buf), &dl, &saved_mask);
@@ -209,7 +204,7 @@ int main(void)
         fflush(stdout);
     }
 
-    LOG_MSG("stopped");
+    LOG_MSG("stopped by signal %d", stop_signal());
 
     close(fd);
     return 0;

@@ -13,11 +13,11 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-static volatile sig_atomic_t g_stop_requested;
+static volatile sig_atomic_t g_stop_signal;
 
-static void on_stop(int signo __attribute__((unused)))
+static void on_stop(int signo)
 {
-    g_stop_requested = 1;
+    g_stop_signal = signo;
 }
 
 static int bind_inet(int type, unsigned short port, int level, int optname, const void *optval, socklen_t optlen)
@@ -369,5 +369,10 @@ int block_signals(const int *signos, size_t count, sigset_t *saved)
 
 int stop_requested(void)
 {
-    return g_stop_requested != 0;
+    return g_stop_signal != 0;
+}
+
+int stop_signal(void)
+{
+    return (int)g_stop_signal;
 }

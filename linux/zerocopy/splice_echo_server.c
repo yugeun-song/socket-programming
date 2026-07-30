@@ -93,6 +93,13 @@ int main(void)
 
     client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
     if (client_fd < 0) {
+        if (errno == ECANCELED) {
+            LOG_MSG("stopped by signal %d", stop_signal());
+            close(listen_fd);
+            close(pipe_fds[PIPE_READ]);
+            close(pipe_fds[PIPE_WRITE]);
+            return 0;
+        }
         LOG_ERRNO("tcp_accept()");
         close(listen_fd);
         close(pipe_fds[PIPE_READ]);
@@ -116,6 +123,10 @@ int main(void)
             break;
         }
         if (wait_ready(client_fd, POLLIN, &io_dl, &saved_mask) < 0) {
+            if (errno == ECANCELED) {
+                LOG_MSG("stopped by signal %d", stop_signal());
+                break;
+            }
             LOG_ERRNO("wait_ready()");
             break;
         }
@@ -137,6 +148,10 @@ int main(void)
         fflush(stdout);
 
         if (splice_all(pipe_fds[PIPE_READ], client_fd, (size_t)n, &io_dl, &saved_mask) < 0) {
+            if (errno == ECANCELED) {
+                LOG_MSG("stopped by signal %d", stop_signal());
+                break;
+            }
             LOG_ERRNO("splice(pipe -> socket)");
             break;
         }

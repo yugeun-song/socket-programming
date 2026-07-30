@@ -44,13 +44,6 @@ union nflog_config {
     char raw[NLMSG_SPACE(sizeof(struct nfgenmsg)) + RTA_SPACE(sizeof(struct nfulnl_msg_config_mode))];
 };
 
-static volatile sig_atomic_t g_stop;
-
-static void on_stop(int signo __attribute__((unused)))
-{
-    g_stop = 1;
-}
-
 static int nfl_config(int fd, unsigned short group, unsigned short attr, const void *data, unsigned short len)
 {
     union nflog_config req;
@@ -150,7 +143,6 @@ static void print_packet(struct nlmsghdr *nlh)
 
 int main(int argc, char **argv)
 {
-    static const int stop_signals[] = { SIGINT, SIGTERM };
     struct nfulnl_msg_config_mode mode = { 0 };
     struct nfulnl_msg_config_cmd cmd = { 0 };
     unsigned short group = DEFAULT_GROUP;
@@ -174,13 +166,8 @@ int main(int argc, char **argv)
         group = (unsigned short)parsed;
     }
 
-    if (install_signal_handler(SIGINT, on_stop, SIGNAL_INTERRUPTS) < 0 ||
-        install_signal_handler(SIGTERM, on_stop, SIGNAL_INTERRUPTS) < 0) {
-        LOG_ERRNO("sigaction()");
-        return 1;
-    }
-    if (block_signals(stop_signals, sizeof(stop_signals) / sizeof(stop_signals[0]), &saved_mask) < 0) {
-        LOG_ERRNO("pthread_sigmask()");
+    if (install_stop_handlers(&saved_mask) < 0) {
+        LOG_ERRNO("install_stop_handlers()");
         return 1;
     }
 
@@ -220,7 +207,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    while (!g_stop) {
+    while (!stop_requested()) {
         n = nl_recv_until(fd, buf, sizeof(buf), &wait_dl, &saved_mask);
         if (n < 0) {
             if (errno == EINTR) {
@@ -247,7 +234,7 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    LOG_MSG("stopped");
+    LOG_MSG("stopped by signal %d", stop_signal());
 
     close(fd);
     return 0;

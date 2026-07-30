@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -51,6 +52,11 @@ int main(void)
 
     client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
     if (client_fd < 0) {
+        if (errno == ECANCELED) {
+            LOG_MSG("stopped by signal %d", stop_signal());
+            close(listen_fd);
+            return 0;
+        }
         LOG_ERRNO("tcp_accept()");
         close(listen_fd);
         return 1;
@@ -72,6 +78,10 @@ int main(void)
 
         n = recv_until(client_fd, buf, sizeof(buf), &io_dl, &saved_mask);
         if (n < 0) {
+            if (errno == ECANCELED) {
+                LOG_MSG("stopped by signal %d", stop_signal());
+                break;
+            }
             LOG_ERRNO("recv()");
             break;
         }
@@ -84,6 +94,10 @@ int main(void)
         fflush(stdout);
 
         if (send_all_until(client_fd, buf, (size_t)n, &io_dl, &saved_mask) < 0) {
+            if (errno == ECANCELED) {
+                LOG_MSG("stopped by signal %d", stop_signal());
+                break;
+            }
             LOG_ERRNO("send()");
             break;
         }

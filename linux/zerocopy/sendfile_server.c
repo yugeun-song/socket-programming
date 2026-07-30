@@ -78,6 +78,12 @@ int main(int argc, char **argv)
 
     client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
     if (client_fd < 0) {
+        if (errno == ECANCELED) {
+            LOG_MSG("stopped by signal %d", stop_signal());
+            close(listen_fd);
+            close(file_fd);
+            return 0;
+        }
         LOG_ERRNO("tcp_accept()");
         close(listen_fd);
         close(file_fd);
@@ -99,6 +105,10 @@ int main(int argc, char **argv)
             break;
         }
         if (wait_ready(client_fd, POLLOUT, &io_dl, &saved_mask) < 0) {
+            if (errno == ECANCELED) {
+                LOG_MSG("stopped by signal %d", stop_signal());
+                break;
+            }
             LOG_ERRNO("wait_ready()");
             break;
         }

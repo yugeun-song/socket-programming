@@ -65,7 +65,7 @@ int main(void)
         n = recvfrom_until(fd, buf, sizeof(buf), &addr, &recv_dl, &saved_mask);
         if (n < 0) {
             if (errno == ECANCELED) {
-                LOG_MSG("stopped");
+                LOG_MSG("stopped by signal %d", stop_signal());
                 break;
             }
             LOG_ERRNO("recvfrom()");
@@ -85,7 +85,7 @@ int main(void)
         }
         if (send_reply(fd, buf, (size_t)n, &addr, &send_dl, &saved_mask) < 0) {
             if (errno == ECANCELED) {
-                LOG_MSG("stopped");
+                LOG_MSG("stopped by signal %d", stop_signal());
                 break;
             }
             LOG_ERRNO("sendto()");

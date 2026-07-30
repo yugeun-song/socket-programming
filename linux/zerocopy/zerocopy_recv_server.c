@@ -76,6 +76,11 @@ int main(void)
 
     client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
     if (client_fd < 0) {
+        if (errno == ECANCELED) {
+            LOG_MSG("stopped by signal %d", stop_signal());
+            close(listen_fd);
+            return 0;
+        }
         LOG_ERRNO("tcp_accept()");
         close(listen_fd);
         return 1;
@@ -103,6 +108,10 @@ int main(void)
             break;
         }
         if (wait_ready(client_fd, POLLIN, &io_dl, &saved_mask) < 0) {
+            if (errno == ECANCELED) {
+                LOG_MSG("stopped by signal %d", stop_signal());
+                break;
+            }
             LOG_ERRNO("wait_ready()");
             break;
         }
@@ -137,6 +146,10 @@ int main(void)
 
         n = recv_until(client_fd, buf, want, &io_dl, &saved_mask);
         if (n < 0) {
+            if (errno == ECANCELED) {
+                LOG_MSG("stopped by signal %d", stop_signal());
+                break;
+            }
             LOG_ERRNO("recv()");
             break;
         }

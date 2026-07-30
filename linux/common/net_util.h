@@ -37,5 +37,6 @@ int install_signal_handler(int signo, void (*handler)(int), int flags);
 int install_stop_handlers(sigset_t *saved);
 int block_signals(const int *signos, size_t count, sigset_t *saved);
 int stop_requested(void);
+int stop_signal(void);
 
 #endif
