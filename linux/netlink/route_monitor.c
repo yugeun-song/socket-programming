@@ -32,15 +32,13 @@ struct event_counts {
 static volatile sig_atomic_t g_stop;
 static volatile sig_atomic_t g_report;
 
-static void on_stop(int signo)
+static void on_stop(int signo __attribute__((unused)))
 {
-    (void)signo;
     g_stop = 1;
 }
 
-static void on_report(int signo)
+static void on_report(int signo __attribute__((unused)))
 {
-    (void)signo;
     g_report = 1;
 }
 
@@ -121,42 +119,42 @@ int main(void)
 
     if (install_signal_handler(SIGINT, on_stop, SIGNAL_INTERRUPTS) < 0 ||
         install_signal_handler(SIGTERM, on_stop, SIGNAL_INTERRUPTS) < 0) {
-        log_errno("sigaction(stop)");
+        LOG_ERRNO("sigaction(stop)");
         return 1;
     }
     if (install_signal_handler(SIGUSR1, on_report, SIGNAL_RESTARTS) < 0) {
-        log_errno("sigaction(SIGUSR1)");
+        LOG_ERRNO("sigaction(SIGUSR1)");
         return 1;
     }
     if (block_signals(watched_signals, sizeof(watched_signals) / sizeof(watched_signals[0]), &saved_mask) < 0) {
-        log_errno("pthread_sigmask()");
+        LOG_ERRNO("pthread_sigmask()");
         return 1;
     }
 
     fd = nl_open(NETLINK_ROUTE);
     if (fd < 0) {
-        log_errno("nl_open()");
+        LOG_ERRNO("nl_open()");
         return 1;
     }
 
     if (nl_set_rcvbuf(fd, RCVBUF_BYTES) < 0) {
-        log_errno("setsockopt(SO_RCVBUF)");
+        LOG_ERRNO("setsockopt(SO_RCVBUF)");
         close(fd);
         return 1;
     }
 
     for (i = 0; i < sizeof(groups) / sizeof(groups[0]); ++i) {
         if (nl_join_group(fd, groups[i]) < 0) {
-            log_errno("setsockopt(NETLINK_ADD_MEMBERSHIP)");
+            LOG_ERRNO("setsockopt(NETLINK_ADD_MEMBERSHIP)");
             close(fd);
             return 1;
         }
     }
 
-    log_msg("watching link, address and IPv4 route events");
+    LOG_MSG("watching link, address and IPv4 route events");
 
     if (deadline_start(&dl, DEADLINE_FOREVER) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(fd);
         return 1;
     }
@@ -164,7 +162,7 @@ int main(void)
     while (!g_stop) {
         if (g_report) {
             g_report = 0;
-            log_msg("%llu link, %llu address, %llu route events, %llu overruns so far", counts.links, counts.addrs,
+            LOG_MSG("%llu link, %llu address, %llu route events, %llu overruns so far", counts.links, counts.addrs,
                     counts.routes, counts.overruns);
         }
 
@@ -175,10 +173,10 @@ int main(void)
             }
             if (errno == ENOBUFS) {
                 counts.overruns += 1;
-                log_msg("the kernel dropped events, this socket overflowed");
+                LOG_MSG("the kernel dropped events, this socket overflowed");
                 continue;
             }
-            log_errno("nl_recv()");
+            LOG_ERRNO("nl_recv()");
             close(fd);
             return 1;
         }
@@ -211,7 +209,7 @@ int main(void)
         fflush(stdout);
     }
 
-    log_msg("stopped");
+    LOG_MSG("stopped");
 
     close(fd);
     return 0;

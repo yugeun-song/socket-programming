@@ -46,9 +46,8 @@ union nflog_config {
 
 static volatile sig_atomic_t g_stop;
 
-static void on_stop(int signo)
+static void on_stop(int signo __attribute__((unused)))
 {
-    (void)signo;
     g_stop = 1;
 }
 
@@ -177,30 +176,30 @@ int main(int argc, char **argv)
 
     if (install_signal_handler(SIGINT, on_stop, SIGNAL_INTERRUPTS) < 0 ||
         install_signal_handler(SIGTERM, on_stop, SIGNAL_INTERRUPTS) < 0) {
-        log_errno("sigaction()");
+        LOG_ERRNO("sigaction()");
         return 1;
     }
     if (block_signals(stop_signals, sizeof(stop_signals) / sizeof(stop_signals[0]), &saved_mask) < 0) {
-        log_errno("pthread_sigmask()");
+        LOG_ERRNO("pthread_sigmask()");
         return 1;
     }
 
     fd = nl_open(NETLINK_NETFILTER);
     if (fd < 0) {
-        log_errno("nl_open(NETLINK_NETFILTER)");
+        LOG_ERRNO("nl_open(NETLINK_NETFILTER)");
         return 1;
     }
 
     cmd.command = NFULNL_CFG_CMD_PF_BIND;
     if (nfl_config(fd, 0, NFULA_CFG_CMD, &cmd, sizeof(cmd)) < 0) {
-        log_errno("NFULNL_CFG_CMD_PF_BIND");
+        LOG_ERRNO("NFULNL_CFG_CMD_PF_BIND");
         close(fd);
         return 1;
     }
 
     cmd.command = NFULNL_CFG_CMD_BIND;
     if (nfl_config(fd, group, NFULA_CFG_CMD, &cmd, sizeof(cmd)) < 0) {
-        log_errno("NFULNL_CFG_CMD_BIND");
+        LOG_ERRNO("NFULNL_CFG_CMD_BIND");
         close(fd);
         return 1;
     }
@@ -208,15 +207,15 @@ int main(int argc, char **argv)
     mode.copy_mode = NFULNL_COPY_PACKET;
     mode.copy_range = htonl(COPY_RANGE);
     if (nfl_config(fd, group, NFULA_CFG_MODE, &mode, sizeof(mode)) < 0) {
-        log_errno("NFULNL_CFG_MODE");
+        LOG_ERRNO("NFULNL_CFG_MODE");
         close(fd);
         return 1;
     }
 
-    log_msg("bound to nflog group %u", group);
+    LOG_MSG("bound to nflog group %u", group);
 
     if (deadline_start(&wait_dl, DEADLINE_FOREVER) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(fd);
         return 1;
     }
@@ -228,10 +227,10 @@ int main(int argc, char **argv)
                 continue;
             }
             if (errno == ENOBUFS) {
-                log_msg("the kernel dropped packets, this socket overflowed");
+                LOG_MSG("the kernel dropped packets, this socket overflowed");
                 continue;
             }
-            log_errno("nl_recv()");
+            LOG_ERRNO("nl_recv()");
             close(fd);
             return 1;
         }
@@ -248,7 +247,7 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    log_msg("stopped");
+    LOG_MSG("stopped");
 
     close(fd);
     return 0;

@@ -60,31 +60,31 @@ int main(void)
     int client_fd;
 
     if (install_stop_handlers(&saved_mask) < 0) {
-        log_errno("install_stop_handlers()");
+        LOG_ERRNO("install_stop_handlers()");
         return 1;
     }
     if (ignore_sigpipe() < 0) {
-        log_errno("sigaction(SIGPIPE)");
+        LOG_ERRNO("sigaction(SIGPIPE)");
         return 1;
     }
 
     if (pipe2(pipe_fds, O_CLOEXEC) < 0) {
-        log_errno("pipe2()");
+        LOG_ERRNO("pipe2()");
         return 1;
     }
 
     listen_fd = tcp_listen(PORT, BACKLOG, 0, 0, NULL, 0);
     if (listen_fd < 0) {
-        log_errno("tcp_listen()");
+        LOG_ERRNO("tcp_listen()");
         close(pipe_fds[PIPE_READ]);
         close(pipe_fds[PIPE_WRITE]);
         return 1;
     }
 
-    log_msg("listening on port %d", PORT);
+    LOG_MSG("listening on port %d", PORT);
 
     if (deadline_start(&accept_dl, DEADLINE_FOREVER) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(listen_fd);
         close(pipe_fds[PIPE_READ]);
         close(pipe_fds[PIPE_WRITE]);
@@ -93,14 +93,14 @@ int main(void)
 
     client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
     if (client_fd < 0) {
-        log_errno("tcp_accept()");
+        LOG_ERRNO("tcp_accept()");
         close(listen_fd);
         close(pipe_fds[PIPE_READ]);
         close(pipe_fds[PIPE_WRITE]);
         return 1;
     }
     if (format_addr(&addr, peer, sizeof(peer)) < 0) {
-        log_errno("format_addr()");
+        LOG_ERRNO("format_addr()");
         close(client_fd);
         close(listen_fd);
         close(pipe_fds[PIPE_READ]);
@@ -108,15 +108,15 @@ int main(void)
         return 1;
     }
 
-    log_msg("accepted %s", peer);
+    LOG_MSG("accepted %s", peer);
 
     while (1) {
         if (deadline_start(&io_dl, IDLE_TIMEOUT_MS) < 0) {
-            log_errno("clock_gettime()");
+            LOG_ERRNO("clock_gettime()");
             break;
         }
         if (wait_ready(client_fd, POLLIN, &io_dl, &saved_mask) < 0) {
-            log_errno("wait_ready()");
+            LOG_ERRNO("wait_ready()");
             break;
         }
 
@@ -125,11 +125,11 @@ int main(void)
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
-            log_errno("splice(socket -> pipe)");
+            LOG_ERRNO("splice(socket -> pipe)");
             break;
         }
         if (n == 0) {
-            log_msg("%s closed the connection", peer);
+            LOG_MSG("%s closed the connection", peer);
             break;
         }
 
@@ -137,7 +137,7 @@ int main(void)
         fflush(stdout);
 
         if (splice_all(pipe_fds[PIPE_READ], client_fd, (size_t)n, &io_dl, &saved_mask) < 0) {
-            log_errno("splice(pipe -> socket)");
+            LOG_ERRNO("splice(pipe -> socket)");
             break;
         }
         relayed += (unsigned long long)n;

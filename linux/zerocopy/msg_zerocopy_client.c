@@ -115,40 +115,40 @@ int main(int argc, char **argv)
 
     chunk = malloc(CHUNK_SIZE);
     if (chunk == NULL) {
-        log_errno("malloc()");
+        LOG_ERRNO("malloc()");
         return 1;
     }
     memset(chunk, 'z', CHUNK_SIZE);
 
     if (deadline_start(&probe_dl, 0) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         free(chunk);
         return 1;
     }
 
     if (deadline_start(&connect_dl, IDLE_TIMEOUT_MS) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         free(chunk);
         return 1;
     }
 
     fd = tcp_connect(host, PORT, &connect_dl);
     if (fd < 0) {
-        log_errno("tcp_connect()");
+        LOG_ERRNO("tcp_connect()");
         free(chunk);
         return 1;
     }
     if (format_peer(fd, peer, sizeof(peer)) < 0) {
-        log_errno("format_peer()");
+        LOG_ERRNO("format_peer()");
         close(fd);
         free(chunk);
         return 1;
     }
 
-    log_msg("connected to %s", peer);
+    LOG_MSG("connected to %s", peer);
 
     if (setsockopt(fd, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof(enable)) < 0) {
-        log_errno("setsockopt(SO_ZEROCOPY)");
+        LOG_ERRNO("setsockopt(SO_ZEROCOPY)");
         close(fd);
         free(chunk);
         return 1;
@@ -158,12 +158,12 @@ int main(int argc, char **argv)
         off = 0;
         while (off < CHUNK_SIZE) {
             if (deadline_start(&send_dl, IDLE_TIMEOUT_MS) < 0) {
-                log_errno("clock_gettime()");
+                LOG_ERRNO("clock_gettime()");
                 has_failed = 1;
                 break;
             }
             if (wait_ready(fd, POLLOUT, &send_dl, NULL) < 0) {
-                log_errno("wait_ready()");
+                LOG_ERRNO("wait_ready()");
                 has_failed = 1;
                 break;
             }
@@ -173,7 +173,7 @@ int main(int argc, char **argv)
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
                 }
-                log_errno("send()");
+                LOG_ERRNO("send()");
                 has_failed = 1;
                 break;
             }
@@ -183,13 +183,13 @@ int main(int argc, char **argv)
         sent += off;
 
         if (drain_completions(fd, &probe_dl, &stats) < 0) {
-            log_errno("recvmsg(MSG_ERRQUEUE)");
+            LOG_ERRNO("recvmsg(MSG_ERRQUEUE)");
             has_failed = 1;
         }
     }
 
     if (deadline_start(&drain_dl, DRAIN_TIMEOUT_MS) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(fd);
         free(chunk);
         return 1;
@@ -198,11 +198,11 @@ int main(int argc, char **argv)
     while (stats.completed < pending) {
         drained = drain_completions(fd, &drain_dl, &stats);
         if (drained < 0) {
-            log_errno("recvmsg(MSG_ERRQUEUE)");
+            LOG_ERRNO("recvmsg(MSG_ERRQUEUE)");
             break;
         }
         if (drained == 0) {
-            log_msg("%u notifications missing", pending - stats.completed);
+            LOG_MSG("%u notifications missing", pending - stats.completed);
             break;
         }
     }

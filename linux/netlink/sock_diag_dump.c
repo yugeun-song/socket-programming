@@ -66,7 +66,7 @@ int main(void)
 
     fd = nl_open(NETLINK_SOCK_DIAG);
     if (fd < 0) {
-        log_errno("nl_open(NETLINK_SOCK_DIAG)");
+        LOG_ERRNO("nl_open(NETLINK_SOCK_DIAG)");
         return 1;
     }
 
@@ -80,13 +80,13 @@ int main(void)
     req.diag.idiag_states = ~0U;
 
     if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
-        log_errno("nl_send()");
+        LOG_ERRNO("nl_send()");
         close(fd);
         return 1;
     }
 
     if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(fd);
         return 1;
     }
@@ -97,7 +97,7 @@ int main(void)
             if (errno == EINTR) {
                 continue;
             }
-            log_errno("nl_recv()");
+            LOG_ERRNO("nl_recv()");
             close(fd);
             return 1;
         }
@@ -111,13 +111,13 @@ int main(void)
                 continue;
             }
             if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
-                log_msg("dump raced with a socket change, result is incomplete");
+                LOG_MSG("dump raced with a socket change, result is incomplete");
                 close(fd);
                 return 1;
             }
             if (nlh->nlmsg_type == NLMSG_DONE) {
                 if (nl_check_done(nlh) < 0) {
-                    log_errno("SOCK_DIAG_BY_FAMILY");
+                    LOG_ERRNO("SOCK_DIAG_BY_FAMILY");
                     close(fd);
                     return 1;
                 }
@@ -125,7 +125,7 @@ int main(void)
                 break;
             }
             if (nl_check_error(nlh) < 0) {
-                log_errno("SOCK_DIAG_BY_FAMILY");
+                LOG_ERRNO("SOCK_DIAG_BY_FAMILY");
                 close(fd);
                 return 1;
             }

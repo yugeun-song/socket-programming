@@ -40,37 +40,37 @@ int main(int argc, char **argv)
     }
 
     if (install_stop_handlers(&saved_mask) < 0) {
-        log_errno("install_stop_handlers()");
+        LOG_ERRNO("install_stop_handlers()");
         return 1;
     }
     if (ignore_sigpipe() < 0) {
-        log_errno("sigaction(SIGPIPE)");
+        LOG_ERRNO("sigaction(SIGPIPE)");
         return 1;
     }
 
     file_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
     if (file_fd < 0) {
-        log_errno("open()");
+        LOG_ERRNO("open()");
         return 1;
     }
 
     if (fstat(file_fd, &st) < 0) {
-        log_errno("fstat()");
+        LOG_ERRNO("fstat()");
         close(file_fd);
         return 1;
     }
 
     listen_fd = tcp_listen(PORT, BACKLOG, 0, 0, NULL, 0);
     if (listen_fd < 0) {
-        log_errno("tcp_listen()");
+        LOG_ERRNO("tcp_listen()");
         close(file_fd);
         return 1;
     }
 
-    log_msg("serving %s (%lld bytes) on port %d", argv[1], (long long)st.st_size, PORT);
+    LOG_MSG("serving %s (%lld bytes) on port %d", argv[1], (long long)st.st_size, PORT);
 
     if (deadline_start(&accept_dl, DEADLINE_FOREVER) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(listen_fd);
         close(file_fd);
         return 1;
@@ -78,28 +78,28 @@ int main(int argc, char **argv)
 
     client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
     if (client_fd < 0) {
-        log_errno("tcp_accept()");
+        LOG_ERRNO("tcp_accept()");
         close(listen_fd);
         close(file_fd);
         return 1;
     }
     if (format_addr(&addr, peer, sizeof(peer)) < 0) {
-        log_errno("format_addr()");
+        LOG_ERRNO("format_addr()");
         close(client_fd);
         close(listen_fd);
         close(file_fd);
         return 1;
     }
 
-    log_msg("accepted %s", peer);
+    LOG_MSG("accepted %s", peer);
 
     while (offset < st.st_size) {
         if (deadline_start(&io_dl, IDLE_TIMEOUT_MS) < 0) {
-            log_errno("clock_gettime()");
+            LOG_ERRNO("clock_gettime()");
             break;
         }
         if (wait_ready(client_fd, POLLOUT, &io_dl, &saved_mask) < 0) {
-            log_errno("wait_ready()");
+            LOG_ERRNO("wait_ready()");
             break;
         }
 
@@ -108,7 +108,7 @@ int main(int argc, char **argv)
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
-            log_errno("sendfile()");
+            LOG_ERRNO("sendfile()");
             break;
         }
         if (n == 0) {

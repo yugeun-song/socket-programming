@@ -15,9 +15,8 @@
 
 static volatile sig_atomic_t g_stop_requested;
 
-static void on_stop(int signo)
+static void on_stop(int signo __attribute__((unused)))
 {
-    (void)signo;
     g_stop_requested = 1;
 }
 

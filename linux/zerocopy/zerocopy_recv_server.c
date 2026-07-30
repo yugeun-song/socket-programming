@@ -56,42 +56,42 @@ int main(void)
     int client_fd;
 
     if (install_stop_handlers(&saved_mask) < 0) {
-        log_errno("install_stop_handlers()");
+        LOG_ERRNO("install_stop_handlers()");
         return 1;
     }
 
     listen_fd = tcp_listen(PORT, BACKLOG, 0, 0, NULL, 0);
     if (listen_fd < 0) {
-        log_errno("tcp_listen()");
+        LOG_ERRNO("tcp_listen()");
         return 1;
     }
 
-    log_msg("listening on port %d", PORT);
+    LOG_MSG("listening on port %d", PORT);
 
     if (deadline_start(&accept_dl, DEADLINE_FOREVER) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(listen_fd);
         return 1;
     }
 
     client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
     if (client_fd < 0) {
-        log_errno("tcp_accept()");
+        LOG_ERRNO("tcp_accept()");
         close(listen_fd);
         return 1;
     }
     if (format_addr(&addr, peer, sizeof(peer)) < 0) {
-        log_errno("format_addr()");
+        LOG_ERRNO("format_addr()");
         close(client_fd);
         close(listen_fd);
         return 1;
     }
 
-    log_msg("accepted %s", peer);
+    LOG_MSG("accepted %s", peer);
 
     area = mmap(NULL, MAP_SIZE, PROT_READ, MAP_SHARED, client_fd, 0);
     if (area == MAP_FAILED) {
-        log_errno("mmap()");
+        LOG_ERRNO("mmap()");
         close(client_fd);
         close(listen_fd);
         return 1;
@@ -99,11 +99,11 @@ int main(void)
 
     while (1) {
         if (deadline_start(&io_dl, IDLE_TIMEOUT_MS) < 0) {
-            log_errno("clock_gettime()");
+            LOG_ERRNO("clock_gettime()");
             break;
         }
         if (wait_ready(client_fd, POLLIN, &io_dl, &saved_mask) < 0) {
-            log_errno("wait_ready()");
+            LOG_ERRNO("wait_ready()");
             break;
         }
 
@@ -119,7 +119,7 @@ int main(void)
             if (errno == EIO) {
                 break;
             }
-            log_errno("getsockopt(TCP_ZEROCOPY_RECEIVE)");
+            LOG_ERRNO("getsockopt(TCP_ZEROCOPY_RECEIVE)");
             break;
         }
 
@@ -137,7 +137,7 @@ int main(void)
 
         n = recv_until(client_fd, buf, want, &io_dl, &saved_mask);
         if (n < 0) {
-            log_errno("recv()");
+            LOG_ERRNO("recv()");
             break;
         }
         if (n == 0) {

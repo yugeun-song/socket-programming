@@ -25,43 +25,43 @@ int main(int argc, char **argv)
     int fd;
 
     if (ignore_sigpipe() < 0) {
-        log_errno("sigaction(SIGPIPE)");
+        LOG_ERRNO("sigaction(SIGPIPE)");
         return 1;
     }
     if (deadline_start(&dl, IDLE_TIMEOUT_MS) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         return 1;
     }
 
     fd = tcp_connect(host, PORT, &dl);
     if (fd < 0) {
-        log_errno("tcp_connect()");
+        LOG_ERRNO("tcp_connect()");
         return 1;
     }
     if (format_peer(fd, peer, sizeof(peer)) < 0) {
-        log_errno("format_peer()");
+        LOG_ERRNO("format_peer()");
         close(fd);
         return 1;
     }
 
-    log_msg("connected to %s", peer);
+    LOG_MSG("connected to %s", peer);
 
     want = strlen(message);
     if (send_all_until(fd, message, want, &dl, NULL) < 0) {
-        log_errno("send()");
+        LOG_ERRNO("send()");
         close(fd);
         return 1;
     }
 
     while (got < want && got < sizeof(buf) - 1) {
         if (deadline_start(&dl, IDLE_TIMEOUT_MS) < 0) {
-            log_errno("clock_gettime()");
+            LOG_ERRNO("clock_gettime()");
             break;
         }
 
         n = recv_until(fd, buf + got, want - got, &dl, NULL);
         if (n < 0) {
-            log_errno("recv()");
+            LOG_ERRNO("recv()");
             break;
         }
         if (n == 0) {

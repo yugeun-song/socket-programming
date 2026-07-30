@@ -93,7 +93,7 @@ int main(void)
 
     fd = nl_open(NETLINK_ROUTE);
     if (fd < 0) {
-        log_errno("nl_open()");
+        LOG_ERRNO("nl_open()");
         return 1;
     }
 
@@ -109,19 +109,19 @@ int main(void)
     ifi->ifi_family = AF_UNSPEC;
 
     if (nl_add_attr(&req.nlh, sizeof(req), IFLA_EXT_MASK, &ext_mask, sizeof(ext_mask)) < 0) {
-        log_errno("nl_add_attr(IFLA_EXT_MASK)");
+        LOG_ERRNO("nl_add_attr(IFLA_EXT_MASK)");
         close(fd);
         return 1;
     }
 
     if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
-        log_errno("nl_send()");
+        LOG_ERRNO("nl_send()");
         close(fd);
         return 1;
     }
 
     if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(fd);
         return 1;
     }
@@ -132,7 +132,7 @@ int main(void)
             if (errno == EINTR) {
                 continue;
             }
-            log_errno("nl_recv()");
+            LOG_ERRNO("nl_recv()");
             close(fd);
             return 1;
         }
@@ -146,13 +146,13 @@ int main(void)
                 continue;
             }
             if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
-                log_msg("dump raced with a link change, result is incomplete");
+                LOG_MSG("dump raced with a link change, result is incomplete");
                 close(fd);
                 return 1;
             }
             if (nlh->nlmsg_type == NLMSG_DONE) {
                 if (nl_check_done(nlh) < 0) {
-                    log_errno("RTM_GETLINK");
+                    LOG_ERRNO("RTM_GETLINK");
                     close(fd);
                     return 1;
                 }
@@ -160,7 +160,7 @@ int main(void)
                 break;
             }
             if (nl_check_error(nlh) < 0) {
-                log_errno("RTM_GETLINK");
+                LOG_ERRNO("RTM_GETLINK");
                 close(fd);
                 return 1;
             }

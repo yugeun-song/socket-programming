@@ -80,7 +80,7 @@ int main(void)
 
     fd = nl_open(NETLINK_GENERIC);
     if (fd < 0) {
-        log_errno("nl_open(NETLINK_GENERIC)");
+        LOG_ERRNO("nl_open(NETLINK_GENERIC)");
         return 1;
     }
 
@@ -93,13 +93,13 @@ int main(void)
     req.genl.version = 1;
 
     if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
-        log_errno("nl_send()");
+        LOG_ERRNO("nl_send()");
         close(fd);
         return 1;
     }
 
     if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(fd);
         return 1;
     }
@@ -110,7 +110,7 @@ int main(void)
             if (errno == EINTR) {
                 continue;
             }
-            log_errno("nl_recv()");
+            LOG_ERRNO("nl_recv()");
             close(fd);
             return 1;
         }
@@ -124,13 +124,13 @@ int main(void)
                 continue;
             }
             if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
-                log_msg("dump raced with a family change, result is incomplete");
+                LOG_MSG("dump raced with a family change, result is incomplete");
                 close(fd);
                 return 1;
             }
             if (nlh->nlmsg_type == NLMSG_DONE) {
                 if (nl_check_done(nlh) < 0) {
-                    log_errno("CTRL_CMD_GETFAMILY");
+                    LOG_ERRNO("CTRL_CMD_GETFAMILY");
                     close(fd);
                     return 1;
                 }
@@ -138,7 +138,7 @@ int main(void)
                 break;
             }
             if (nl_check_error(nlh) < 0) {
-                log_errno("CTRL_CMD_GETFAMILY");
+                LOG_ERRNO("CTRL_CMD_GETFAMILY");
                 close(fd);
                 return 1;
             }

@@ -43,20 +43,20 @@ int main(void)
     int fd;
 
     if (install_stop_handlers(&saved_mask) < 0) {
-        log_errno("install_stop_handlers()");
+        LOG_ERRNO("install_stop_handlers()");
         return 1;
     }
 
     fd = udp_bind(PORT, 0, 0, NULL, 0);
     if (fd < 0) {
-        log_errno("udp_bind()");
+        LOG_ERRNO("udp_bind()");
         return 1;
     }
 
-    log_msg("listening on port %d", PORT);
+    LOG_MSG("listening on port %d", PORT);
 
     if (deadline_start(&recv_dl, DEADLINE_FOREVER) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(fd);
         return 1;
     }
@@ -65,14 +65,14 @@ int main(void)
         n = recvfrom_until(fd, buf, sizeof(buf), &addr, &recv_dl, &saved_mask);
         if (n < 0) {
             if (errno == ECANCELED) {
-                log_msg("stopped");
+                LOG_MSG("stopped");
                 break;
             }
-            log_errno("recvfrom()");
+            LOG_ERRNO("recvfrom()");
             break;
         }
         if (format_addr(&addr, peer, sizeof(peer)) < 0) {
-            log_errno("format_addr()");
+            LOG_ERRNO("format_addr()");
             break;
         }
 
@@ -80,15 +80,15 @@ int main(void)
         fflush(stdout);
 
         if (deadline_start(&send_dl, IDLE_TIMEOUT_MS) < 0) {
-            log_errno("clock_gettime()");
+            LOG_ERRNO("clock_gettime()");
             break;
         }
         if (send_reply(fd, buf, (size_t)n, &addr, &send_dl, &saved_mask) < 0) {
             if (errno == ECANCELED) {
-                log_msg("stopped");
+                LOG_MSG("stopped");
                 break;
             }
-            log_errno("sendto()");
+            LOG_ERRNO("sendto()");
         }
     }
 

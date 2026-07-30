@@ -270,30 +270,30 @@ int main(int argc, char **argv)
         }
         ifindex = if_nametoindex(argv[2]);
         if (ifindex == 0) {
-            log_errno("if_nametoindex()");
+            LOG_ERRNO("if_nametoindex()");
             return 1;
         }
         if (parse_cidr(argv[3], &ip, &prefix) < 0) {
-            log_msg("bad address '%s', expected <addr>/<prefix>", argv[3]);
+            LOG_MSG("bad address '%s', expected <addr>/<prefix>", argv[3]);
             return 1;
         }
     }
 
     fd = nl_open(NETLINK_ROUTE);
     if (fd < 0) {
-        log_errno("nl_open()");
+        LOG_ERRNO("nl_open()");
         return 1;
     }
 
     if (is_listing) {
         rc = list_addrs(fd);
         if (rc < 0) {
-            log_errno("RTM_GETADDR");
+            LOG_ERRNO("RTM_GETADDR");
         }
     } else {
         rc = change_addr(fd, type, extra_flags, ifindex, &ip, prefix);
         if (rc < 0) {
-            log_errno((type == RTM_NEWADDR) ? "RTM_NEWADDR" : "RTM_DELADDR");
+            LOG_ERRNO((type == RTM_NEWADDR) ? "RTM_NEWADDR" : "RTM_DELADDR");
         } else {
             printf("addr_manage: %s %s on %s\n", (type == RTM_NEWADDR) ? "added" : "removed", argv[3], argv[2]);
         }

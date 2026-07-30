@@ -27,32 +27,32 @@ int main(int argc, char **argv)
 
     fd = udp_connect(host, PORT);
     if (fd < 0) {
-        log_errno("udp_connect()");
+        LOG_ERRNO("udp_connect()");
         return 1;
     }
 
     if (deadline_start(&dl, IDLE_TIMEOUT_MS) < 0) {
-        log_errno("clock_gettime()");
+        LOG_ERRNO("clock_gettime()");
         close(fd);
         return 1;
     }
 
     if (send_all_until(fd, message, strlen(message), &dl, NULL) < 0) {
-        log_errno("send()");
+        LOG_ERRNO("send()");
         close(fd);
         return 1;
     }
 
     n = recvfrom_until(fd, buf, sizeof(buf) - 1, &from, &dl, NULL);
     if (n < 0) {
-        log_errno("recvfrom()");
+        LOG_ERRNO("recvfrom()");
         close(fd);
         return 1;
     }
     buf[n] = '\0';
 
     if (format_addr(&from, peer, sizeof(peer)) < 0) {
-        log_errno("format_addr()");
+        LOG_ERRNO("format_addr()");
         close(fd);
         return 1;
     }
