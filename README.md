@@ -47,6 +47,9 @@ Rules no formatter can check, applied to every source in both trees:
   shadowing an outer name.
 - Header prototypes are packed by concern with a blank line between groups, never one blank line
   per declaration. The grouping is what carries the information; uniform spacing carries none.
+- Whoever receives says who sent. Every program that reads from a socket prints the peer as
+  `address:port`, so a reply is evidence of a specific exchange rather than a hopeful echo. The
+  netlink programs are exempt: their peer is always the kernel.
 
 Everything under `linux/` is written as if it were one thread among many and as if signals arrive
 at any moment, even where the program itself is single threaded and installs no handler:
@@ -86,6 +89,16 @@ at any moment, even where the program itself is single threaded and installs no 
   Truncating the conversion made a 5 ms deadline expire at 4 ms and a 1 ms deadline expire before it
   began. The remaining time is computed in nanoseconds and rounded up to the next millisecond, so
   zero means the instant has genuinely passed.
+- **A timeout only binds a call that can return early.** Every socket here is created with
+  `SOCK_NONBLOCK`, because polling before a blocking call bounds nothing: the poll answers "at least
+  one byte fits", and the call then writes megabytes and sleeps inside the kernel with the deadline
+  untouched. Measured on a receiver that never read: one `sendfile()` on a blocking socket held for
+  20.001 s despite a 5 s deadline sitting right in front of it. With the socket non-blocking the same
+  call returns in 0.000207 s, the loop sees `EAGAIN`, and the deadline fires at 5.038 s. `splice`
+  additionally passes `SPLICE_F_NONBLOCK`, since the pipe end has flags of its own.
+- Timeouts are idle timeouts, restarted when bytes actually move, not caps on a whole transfer. A
+  100 MB file is not a failure; five seconds of no progress is. The restart is per completed
+  operation, never inside one wait's `EINTR` retry loop, which is what keeps the bound real.
 - No mutable globals. The one exception is that stop flag. Shared counters are C11 atomics:
   `nl_next_seq` hands out netlink sequence numbers with `atomic_fetch_add_explicit`.
 - Only thread-safe library calls: `strerror_r` not `strerror`, `inet_ntop` not `inet_ntoa`,
@@ -139,8 +152,12 @@ make -C linux clean
 
 ### layout
 
-- `common/net_util.{c,h}` — BSD helpers: `tcp_listen`, `tcp_connect`, `tcp_accept`, `udp_bind`,
-  `udp_connect`, `send_all`, `set_nonblocking`, `ignore_sigpipe`, `install_signal_handler`.
+- `common/net_util.{c,h}` — BSD helpers. Every blocking step takes a deadline and an optional signal
+  mask: `tcp_listen`, `tcp_connect`, `tcp_accept`, `udp_bind`, `udp_connect`, `wait_ready`,
+  `recv_until`, `recvfrom_until`, `send_all_until`, `set_nonblocking`. `format_addr` and
+  `format_peer` render a peer as `address:port`. `ignore_sigpipe`, `install_signal_handler`,
+  `install_stop_handlers`, `block_signals` and `stop_requested` cover the signal side; a stop request
+  surfaces as `ECANCELED` out of any wait, so shutdown travels the same path as an error.
 - `common/deadline.{c,h}` — absolute monotonic deadlines: `deadline_start`, `deadline_left_ms`,
   `deadline_expired`, `poll_until`.
 - `common/log.{c,h}` — `log_msg` and `log_errno` write `program: function(): text` to stderr, so no
