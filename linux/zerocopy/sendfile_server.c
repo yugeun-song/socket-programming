@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -9,14 +10,23 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 
+#include <netinet/in.h>
+
+#include "common/deadline.h"
 #include "common/log.h"
 #include "common/net_util.h"
 
 #define PORT 5001
 #define BACKLOG 8
+#define IDLE_TIMEOUT_MS 5000
 
 int main(int argc, char **argv)
 {
+    char peer[PEER_TEXT_MAX] = { 0 };
+    struct sockaddr_in addr = { 0 };
+    struct deadline accept_dl;
+    struct deadline io_dl;
+    sigset_t saved_mask;
     struct stat st;
     off_t offset = 0;
     ssize_t n;
@@ -29,6 +39,10 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (install_stop_handlers(&saved_mask) < 0) {
+        log_errno("install_stop_handlers()");
+        return 1;
+    }
     if (ignore_sigpipe() < 0) {
         log_errno("sigaction(SIGPIPE)");
         return 1;
@@ -55,18 +69,43 @@ int main(int argc, char **argv)
 
     log_msg("serving %s (%lld bytes) on port %d", argv[1], (long long)st.st_size, PORT);
 
-    client_fd = tcp_accept(listen_fd);
+    if (deadline_start(&accept_dl, DEADLINE_FOREVER) < 0) {
+        log_errno("clock_gettime()");
+        close(listen_fd);
+        close(file_fd);
+        return 1;
+    }
+
+    client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
     if (client_fd < 0) {
         log_errno("tcp_accept()");
         close(listen_fd);
         close(file_fd);
         return 1;
     }
+    if (format_addr(&addr, peer, sizeof(peer)) < 0) {
+        log_errno("format_addr()");
+        close(client_fd);
+        close(listen_fd);
+        close(file_fd);
+        return 1;
+    }
+
+    log_msg("accepted %s", peer);
 
     while (offset < st.st_size) {
+        if (deadline_start(&io_dl, IDLE_TIMEOUT_MS) < 0) {
+            log_errno("clock_gettime()");
+            break;
+        }
+        if (wait_ready(client_fd, POLLOUT, &io_dl, &saved_mask) < 0) {
+            log_errno("wait_ready()");
+            break;
+        }
+
         n = sendfile(client_fd, file_fd, &offset, (size_t)(st.st_size - offset));
         if (n < 0) {
-            if (errno == EINTR) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
             log_errno("sendfile()");
@@ -77,7 +116,7 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("sendfile_server: sent %lld bytes\n", (long long)offset);
+    printf("sendfile_server: sent %lld bytes to %s\n", (long long)offset, peer);
 
     close(client_fd);
     close(listen_fd);

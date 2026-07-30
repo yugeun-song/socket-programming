@@ -21,6 +21,7 @@
 #define CHUNK_SIZE (256 * 1024)
 #define CHUNK_COUNT 16
 #define DRAIN_TIMEOUT_MS 2000
+#define IDLE_TIMEOUT_MS 5000
 
 union zc_control {
     char raw[CMSG_SPACE(sizeof(struct sock_extended_err) + sizeof(struct sockaddr_in))];
@@ -95,11 +96,14 @@ static int drain_completions(int fd, const struct deadline *dl, struct zc_stats 
 int main(int argc, char **argv)
 {
     const char *host = (argc > 1) ? argv[1] : "127.0.0.1";
+    char peer[PEER_TEXT_MAX] = { 0 };
     struct zc_stats stats = { 0 };
     unsigned long long sent = 0;
     unsigned int pending = 0;
+    struct deadline connect_dl;
     struct deadline probe_dl;
     struct deadline drain_dl;
+    struct deadline send_dl;
     int has_failed = 0;
     int enable = 1;
     char *chunk;
@@ -122,12 +126,26 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    fd = tcp_connect(host, PORT);
+    if (deadline_start(&connect_dl, IDLE_TIMEOUT_MS) < 0) {
+        log_errno("clock_gettime()");
+        free(chunk);
+        return 1;
+    }
+
+    fd = tcp_connect(host, PORT, &connect_dl);
     if (fd < 0) {
         log_errno("tcp_connect()");
         free(chunk);
         return 1;
     }
+    if (format_peer(fd, peer, sizeof(peer)) < 0) {
+        log_errno("format_peer()");
+        close(fd);
+        free(chunk);
+        return 1;
+    }
+
+    log_msg("connected to %s", peer);
 
     if (setsockopt(fd, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof(enable)) < 0) {
         log_errno("setsockopt(SO_ZEROCOPY)");
@@ -139,9 +157,20 @@ int main(int argc, char **argv)
     for (i = 0; i < CHUNK_COUNT && !has_failed; ++i) {
         off = 0;
         while (off < CHUNK_SIZE) {
+            if (deadline_start(&send_dl, IDLE_TIMEOUT_MS) < 0) {
+                log_errno("clock_gettime()");
+                has_failed = 1;
+                break;
+            }
+            if (wait_ready(fd, POLLOUT, &send_dl, NULL) < 0) {
+                log_errno("wait_ready()");
+                has_failed = 1;
+                break;
+            }
+
             n = send(fd, chunk + off, CHUNK_SIZE - off, MSG_ZEROCOPY | MSG_NOSIGNAL);
             if (n < 0) {
-                if (errno == EINTR) {
+                if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
                 }
                 log_errno("send()");
@@ -178,7 +207,7 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("msg_zerocopy_client: sent %llu bytes in %u zero-copy send() calls\n", sent, pending);
+    printf("msg_zerocopy_client: sent %llu bytes to %s in %u zero-copy send() calls\n", sent, peer, pending);
     printf("msg_zerocopy_client: %u notifications, %u ranges the kernel copied\n", stats.completed, stats.copied);
 
     close(fd);
