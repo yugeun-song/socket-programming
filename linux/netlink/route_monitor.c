@@ -20,7 +20,7 @@
 #include "common/net_util.h"
 #include "netlink/nl_util.h"
 
-#define RCVBUF_BYTES (1024 * 1024)
+#define RCVBUF_BYTES_HELPER (1024 * 1024)
 
 struct event_counts {
     unsigned long long links;
@@ -29,182 +29,187 @@ struct event_counts {
     unsigned long long overruns;
 };
 
-static volatile sig_atomic_t g_report_signal;
+static volatile sig_atomic_t g_report_signal_number;
 
-static void on_report(int signo)
+static void on_report_signal_helper(int signal_number)
 {
-    g_report_signal = signo;
+    g_report_signal_number = signal_number;
 }
 
-static void print_link_event(struct nlmsghdr *nlh)
+static void print_link_event_helper(struct nlmsghdr *nl_header)
 {
-    struct rtattr *tb[IFLA_MAX + 1];
-    struct ifinfomsg *ifi;
-    const char *name = "?";
+    struct rtattr *attr_table[IFLA_MAX + 1];
+    struct ifinfomsg *link_info;
+    const char *link_name = "?";
 
-    ifi = (struct ifinfomsg *)NLMSG_DATA(nlh);
-    nl_parse_attrs(IFLA_RTA(ifi), (int)IFLA_PAYLOAD(nlh), tb, IFLA_MAX);
+    link_info = (struct ifinfomsg *)NLMSG_DATA(nl_header);
+    nl_parse_attrs_helper(IFLA_RTA(link_info), (int)IFLA_PAYLOAD(nl_header), attr_table, IFLA_MAX);
 
-    if (tb[IFLA_IFNAME] != NULL) {
-        name = (const char *)RTA_DATA(tb[IFLA_IFNAME]);
+    if (attr_table[IFLA_IFNAME] != NULL) {
+        link_name = (const char *)RTA_DATA(attr_table[IFLA_IFNAME]);
     }
 
-    printf("route_monitor: %s %-10s %s\n", (nlh->nlmsg_type == RTM_NEWLINK) ? "link+" : "link-", name,
-           (ifi->ifi_flags & IFF_UP) ? "UP" : "DOWN");
+    LOG_RESULT_HELPER("%s %-10s %s", (nl_header->nlmsg_type == RTM_NEWLINK) ? "link+" : "link-", link_name,
+                      (link_info->ifi_flags & IFF_UP) ? "UP" : "DOWN");
 }
 
-static void print_addr_event(struct nlmsghdr *nlh)
+static void print_addr_event_helper(struct nlmsghdr *nl_header)
 {
-    char text[INET6_ADDRSTRLEN] = { 0 };
-    char name[IF_NAMESIZE] = { 0 };
-    struct rtattr *tb[IFA_MAX + 1];
-    struct ifaddrmsg *ifa;
-    struct rtattr *src;
+    char addr_text[INET6_ADDRSTRLEN] = { 0 };
+    char link_name[IF_NAMESIZE] = { 0 };
+    struct rtattr *attr_table[IFA_MAX + 1];
+    struct ifaddrmsg *addr_info;
+    struct rtattr *addr_attr;
 
-    ifa = (struct ifaddrmsg *)NLMSG_DATA(nlh);
-    nl_parse_attrs(IFA_RTA(ifa), (int)IFA_PAYLOAD(nlh), tb, IFA_MAX);
+    addr_info = (struct ifaddrmsg *)NLMSG_DATA(nl_header);
+    nl_parse_attrs_helper(IFA_RTA(addr_info), (int)IFA_PAYLOAD(nl_header), attr_table, IFA_MAX);
 
-    src = (tb[IFA_LOCAL] != NULL) ? tb[IFA_LOCAL] : tb[IFA_ADDRESS];
-    if (src == NULL) {
+    addr_attr = (attr_table[IFA_LOCAL] != NULL) ? attr_table[IFA_LOCAL] : attr_table[IFA_ADDRESS];
+    if (addr_attr == NULL) {
         return;
     }
-    if (inet_ntop(ifa->ifa_family, RTA_DATA(src), text, sizeof(text)) == NULL) {
+    if (inet_ntop(addr_info->ifa_family, RTA_DATA(addr_attr), addr_text, sizeof(addr_text)) == NULL) {
         return;
     }
-    if (if_indextoname(ifa->ifa_index, name) == NULL) {
-        snprintf(name, sizeof(name), "%u", ifa->ifa_index);
+    if (if_indextoname(addr_info->ifa_index, link_name) == NULL) {
+        snprintf(link_name, sizeof(link_name), "%u", addr_info->ifa_index);
     }
 
-    printf("route_monitor: %s %s/%u dev %s\n", (nlh->nlmsg_type == RTM_NEWADDR) ? "addr+" : "addr-", text, ifa->ifa_prefixlen, name);
+    LOG_RESULT_HELPER("%s %s/%u dev %s", (nl_header->nlmsg_type == RTM_NEWADDR) ? "addr+" : "addr-", addr_text,
+                      addr_info->ifa_prefixlen, link_name);
 }
 
-static void print_route_event(struct nlmsghdr *nlh)
+static void print_route_event_helper(struct nlmsghdr *nl_header)
 {
-    char text[INET6_ADDRSTRLEN] = { 0 };
-    struct rtattr *tb[RTA_MAX + 1];
-    struct rtmsg *rtm;
+    char addr_text[INET6_ADDRSTRLEN] = { 0 };
+    struct rtattr *attr_table[RTA_MAX + 1];
+    struct rtmsg *route_info;
 
-    rtm = (struct rtmsg *)NLMSG_DATA(nlh);
-    nl_parse_attrs(RTM_RTA(rtm), (int)RTM_PAYLOAD(nlh), tb, RTA_MAX);
+    route_info = (struct rtmsg *)NLMSG_DATA(nl_header);
+    nl_parse_attrs_helper(RTM_RTA(route_info), (int)RTM_PAYLOAD(nl_header), attr_table, RTA_MAX);
 
-    if (tb[RTA_DST] == NULL) {
-        snprintf(text, sizeof(text), "default");
-    } else if (inet_ntop(rtm->rtm_family, RTA_DATA(tb[RTA_DST]), text, sizeof(text)) == NULL) {
+    if (attr_table[RTA_DST] == NULL) {
+        snprintf(addr_text, sizeof(addr_text), "default");
+    } else if (inet_ntop(route_info->rtm_family, RTA_DATA(attr_table[RTA_DST]), addr_text, sizeof(addr_text)) == NULL) {
         return;
     }
 
-    printf("route_monitor: %s %s/%u table %u\n", (nlh->nlmsg_type == RTM_NEWROUTE) ? "route+" : "route-", text,
-           rtm->rtm_dst_len, rtm->rtm_table);
+    LOG_RESULT_HELPER("%s %s/%u table %u", (nl_header->nlmsg_type == RTM_NEWROUTE) ? "route+" : "route-", addr_text,
+                      route_info->rtm_dst_len, route_info->rtm_table);
 }
 
 int main(void)
 {
-    static const unsigned int groups[] = { RTNLGRP_LINK, RTNLGRP_IPV4_IFADDR, RTNLGRP_IPV6_IFADDR, RTNLGRP_IPV4_ROUTE };
-    static const int report_signals[] = { SIGUSR1 };
+    static const unsigned int event_groups[] = { RTNLGRP_LINK, RTNLGRP_IPV4_IFADDR, RTNLGRP_IPV6_IFADDR,
+                                                 RTNLGRP_IPV4_ROUTE };
     struct event_counts counts = { 0 };
-    char buf[NL_BUF_SIZE];
-    struct nlmsghdr *nlh;
-    struct deadline dl;
-    sigset_t saved_mask;
+    char nl_recv_buf[NL_BUF_SIZE_HELPER];
+    struct nlmsghdr *nl_header;
+    sigset_t wait_signal_mask;
+    sigset_t signals_to_block;
     size_t i;
-    ssize_t n;
-    int report;
+    ssize_t received_bytes;
+    int report_signal_number;
+    int mask_error_code;
     int len;
     int fd;
 
-    if (install_stop_handlers(&saved_mask) < 0) {
-        LOG_ERRNO("install_stop_handlers()");
+    if (catch_shutdown_signals_helper(&wait_signal_mask) < 0) {
+        LOG_ERRNO_HELPER("catch_shutdown_signals_helper()");
         return 1;
     }
-    if (install_signal_handler(SIGUSR1, on_report, SIGNAL_RESTARTS) < 0) {
-        LOG_ERRNO("sigaction(SIGUSR1)");
+    if (register_signal_handler_helper(SIGUSR1, on_report_signal_helper, SA_RESTART) < 0) {
+        LOG_ERRNO_HELPER("sigaction(SIGUSR1)");
         return 1;
     }
-    if (block_signals(report_signals, sizeof(report_signals) / sizeof(report_signals[0]), NULL) < 0) {
-        LOG_ERRNO("pthread_sigmask()");
+    if (sigemptyset(&signals_to_block) < 0) {
+        LOG_ERRNO_HELPER("sigemptyset()");
+        return 1;
+    }
+    if (sigaddset(&signals_to_block, SIGUSR1) < 0) {
+        LOG_ERRNO_HELPER("sigaddset()");
         return 1;
     }
 
-    fd = nl_open(NETLINK_ROUTE);
+    mask_error_code = pthread_sigmask(SIG_BLOCK, &signals_to_block, NULL);
+    if (mask_error_code != 0) {
+        errno = mask_error_code;
+        LOG_ERRNO_HELPER("pthread_sigmask()");
+        return 1;
+    }
+
+    fd = nl_open_helper(NETLINK_ROUTE);
     if (fd < 0) {
-        LOG_ERRNO("nl_open()");
+        LOG_ERRNO_HELPER("nl_open_helper()");
         return 1;
     }
 
-    if (nl_set_rcvbuf(fd, RCVBUF_BYTES) < 0) {
-        LOG_ERRNO("setsockopt(SO_RCVBUF)");
+    if (nl_set_rcvbuf_helper(fd, RCVBUF_BYTES_HELPER) < 0) {
+        LOG_ERRNO_HELPER("setsockopt(SO_RCVBUF)");
         close(fd);
         return 1;
     }
 
-    for (i = 0; i < sizeof(groups) / sizeof(groups[0]); ++i) {
-        if (nl_join_group(fd, groups[i]) < 0) {
-            LOG_ERRNO("setsockopt(NETLINK_ADD_MEMBERSHIP)");
+    for (i = 0; i < sizeof(event_groups) / sizeof(event_groups[0]); ++i) {
+        if (nl_join_group_helper(fd, event_groups[i]) < 0) {
+            LOG_ERRNO_HELPER("setsockopt(NETLINK_ADD_MEMBERSHIP)");
             close(fd);
             return 1;
         }
     }
 
-    LOG_MSG("watching link, address and IPv4 route events");
+    LOG_MSG_HELPER("watching link, address and IPv4 route events");
 
-    if (deadline_start(&dl, DEADLINE_FOREVER) < 0) {
-        LOG_ERRNO("clock_gettime()");
-        close(fd);
-        return 1;
-    }
-
-    while (!stop_requested()) {
-        report = (int)g_report_signal;
-        if (report != 0) {
-            g_report_signal = 0;
-            LOG_MSG("signal %d: %llu link, %llu address, %llu route events, %llu overruns so far", report, counts.links,
-                    counts.addrs, counts.routes, counts.overruns);
+    while (!should_shut_down_helper()) {
+        report_signal_number = (int)g_report_signal_number;
+        if (report_signal_number != 0) {
+            g_report_signal_number = 0;
+            LOG_MSG_HELPER("signal %d: %llu link, %llu address, %llu route events, %llu overruns so far",
+                           report_signal_number, counts.links, counts.addrs, counts.routes, counts.overruns);
         }
 
-        n = nl_recv_until(fd, buf, sizeof(buf), &dl, &saved_mask);
-        if (n < 0) {
+        received_bytes = nl_recv_or_shutdown_helper(fd, nl_recv_buf, sizeof(nl_recv_buf), &wait_signal_mask);
+        if (received_bytes < 0) {
             if (errno == EINTR) {
                 continue;
-            }
-            if (errno == ENOBUFS) {
+            } else if (errno == ENOBUFS) {
                 counts.overruns += 1;
-                LOG_MSG("the kernel dropped events, this socket overflowed");
+                LOG_MSG_HELPER("the kernel dropped events, this socket overflowed");
                 continue;
             }
-            LOG_ERRNO("nl_recv()");
+            LOG_ERRNO_HELPER("nl_recv_helper()");
             close(fd);
             return 1;
         }
 
-        len = (int)n;
-        nlh = (struct nlmsghdr *)buf;
+        len = (int)received_bytes;
+        nl_header = (struct nlmsghdr *)nl_recv_buf;
 
-        while (NLMSG_OK(nlh, len)) {
-            switch (nlh->nlmsg_type) {
+        while (NLMSG_OK(nl_header, len)) {
+            switch (nl_header->nlmsg_type) {
             case RTM_NEWLINK:
             case RTM_DELLINK:
-                print_link_event(nlh);
+                print_link_event_helper(nl_header);
                 counts.links += 1;
                 break;
             case RTM_NEWADDR:
             case RTM_DELADDR:
-                print_addr_event(nlh);
+                print_addr_event_helper(nl_header);
                 counts.addrs += 1;
                 break;
             case RTM_NEWROUTE:
             case RTM_DELROUTE:
-                print_route_event(nlh);
+                print_route_event_helper(nl_header);
                 counts.routes += 1;
                 break;
             default:
                 break;
             }
-            nlh = NLMSG_NEXT(nlh, len);
+            nl_header = NLMSG_NEXT(nl_header, len);
         }
-        fflush(stdout);
     }
 
-    LOG_MSG("stopped by signal %d", stop_signal());
+    LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
 
     close(fd);
     return 0;

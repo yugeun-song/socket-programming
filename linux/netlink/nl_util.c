@@ -4,13 +4,15 @@
 
 #include <errno.h>
 #include <poll.h>
-#include <stdatomic.h>
+#include <pthread.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <sys/socket.h>
 
-int nl_open(int protocol)
+#include "common/net_util.h"
+
+int nl_open_helper(int protocol)
 {
     struct sockaddr_nl addr = { 0 };
     int saved_errno;
@@ -32,12 +34,12 @@ int nl_open(int protocol)
     return fd;
 }
 
-int nl_join_group(int fd, unsigned int group)
+int nl_join_group_helper(int fd, unsigned int group)
 {
     return setsockopt(fd, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof(group));
 }
 
-int nl_set_rcvbuf(int fd, int bytes)
+int nl_set_rcvbuf_helper(int fd, int bytes)
 {
     if (setsockopt(fd, SOL_SOCKET, SO_RCVBUFFORCE, &bytes, sizeof(bytes)) == 0) {
         return 0;
@@ -45,16 +47,16 @@ int nl_set_rcvbuf(int fd, int bytes)
     return setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(bytes));
 }
 
-int nl_send(int fd, const void *msg, size_t len)
+int nl_send_helper(int fd, const void *msg, size_t len)
 {
     struct sockaddr_nl kernel = { 0 };
-    ssize_t n;
+    ssize_t sent_bytes;
 
     kernel.nl_family = AF_NETLINK;
 
     while (1) {
-        n = sendto(fd, msg, len, MSG_NOSIGNAL, (struct sockaddr *)&kernel, sizeof(kernel));
-        if (n >= 0) {
+        sent_bytes = sendto(fd, msg, len, MSG_NOSIGNAL, (struct sockaddr *)&kernel, sizeof(kernel));
+        if (sent_bytes >= 0) {
             break;
         }
         if (errno != EINTR) {
@@ -62,139 +64,134 @@ int nl_send(int fd, const void *msg, size_t len)
         }
     }
 
-    if ((size_t)n != len) {
+    if ((size_t)sent_bytes != len) {
         errno = EMSGSIZE;
         return -1;
     }
     return 0;
 }
 
-ssize_t nl_recv(int fd, void *buf, size_t len)
+ssize_t nl_recv_helper(int fd, void *nl_recv_buf, size_t len)
 {
     struct sockaddr_nl from = { 0 };
     socklen_t fromlen = sizeof(from);
-    ssize_t n;
+    ssize_t received_bytes;
 
-    n = recvfrom(fd, buf, len, MSG_TRUNC, (struct sockaddr *)&from, &fromlen);
-    if (n < 0) {
+    received_bytes = recvfrom(fd, nl_recv_buf, len, MSG_TRUNC, (struct sockaddr *)&from, &fromlen);
+    if (received_bytes < 0) {
         return -1;
     }
     if (fromlen != sizeof(from) || from.nl_pid != 0) {
         errno = EBADMSG;
         return -1;
     }
-    if ((size_t)n > len) {
+    if ((size_t)received_bytes > len) {
         errno = EMSGSIZE;
         return -1;
     }
-    return n;
+    return received_bytes;
 }
 
-ssize_t nl_recv_until(int fd, void *buf, size_t len, const struct deadline *dl, const sigset_t *mask)
+ssize_t nl_recv_or_shutdown_helper(int fd, void *nl_recv_buf, size_t len, const sigset_t *wait_signal_mask)
 {
-    int ready;
-
-    if (deadline_expired(dl)) {
-        errno = ETIMEDOUT;
+    if (wait_ready_or_shutdown_helper(fd, POLLIN, wait_signal_mask) < 0) {
         return -1;
     }
-
-    ready = poll_until(fd, POLLIN, dl, mask);
-    if (ready < 0) {
-        return -1;
-    }
-    if (ready == 0) {
-        errno = ETIMEDOUT;
-        return -1;
-    }
-
-    return nl_recv(fd, buf, len);
+    return nl_recv_helper(fd, nl_recv_buf, len);
 }
 
-int nl_add_attr(struct nlmsghdr *nlh, size_t cap, unsigned short type, const void *data, unsigned short len)
+int nl_add_attr_helper(struct nlmsghdr *nl_header, size_t capacity, unsigned short type, const void *data,
+                       unsigned short len)
 {
-    struct rtattr *rta;
-    size_t need;
-    size_t pad;
+    struct rtattr *attr;
+    size_t needed_size;
+    size_t pad_bytes;
 
-    need = NLMSG_ALIGN(nlh->nlmsg_len) + RTA_SPACE(len);
-    if (need > cap) {
-        errno = ENOSPC;
+    needed_size = NLMSG_ALIGN(nl_header->nlmsg_len) + RTA_SPACE(len);
+    if (needed_size > capacity) {
+        errno = ENOBUFS;
         return -1;
     }
 
-    rta = (struct rtattr *)((char *)nlh + NLMSG_ALIGN(nlh->nlmsg_len));
-    rta->rta_type = type;
-    rta->rta_len = (unsigned short)RTA_LENGTH(len);
+    attr = (struct rtattr *)((char *)nl_header + NLMSG_ALIGN(nl_header->nlmsg_len));
+    attr->rta_type = type;
+    attr->rta_len = (unsigned short)RTA_LENGTH(len);
     if (len > 0) {
-        memcpy(RTA_DATA(rta), data, len);
+        memcpy(RTA_DATA(attr), data, len);
     }
 
-    pad = RTA_SPACE(len) - RTA_LENGTH(len);
-    if (pad > 0) {
-        memset((char *)RTA_DATA(rta) + len, 0, pad);
+    pad_bytes = RTA_SPACE(len) - RTA_LENGTH(len);
+    if (pad_bytes > 0) {
+        memset((char *)RTA_DATA(attr) + len, 0, pad_bytes);
     }
 
-    nlh->nlmsg_len = (unsigned int)need;
+    nl_header->nlmsg_len = (unsigned int)needed_size;
     return 0;
 }
 
-void nl_parse_attrs(struct rtattr *rta, int len, struct rtattr **tb, unsigned short max)
+void nl_parse_attrs_helper(struct rtattr *attr, int len, struct rtattr **attr_table, unsigned short max)
 {
     unsigned short type;
 
-    memset(tb, 0, sizeof(*tb) * ((size_t)max + 1));
+    memset(attr_table, 0, sizeof(*attr_table) * ((size_t)max + 1));
 
-    while (RTA_OK(rta, len)) {
-        type = (unsigned short)(rta->rta_type & NLA_TYPE_MASK);
-        if (type <= max && tb[type] == NULL) {
-            tb[type] = rta;
+    while (RTA_OK(attr, len)) {
+        type = (unsigned short)(attr->rta_type & NLA_TYPE_MASK);
+        if (type <= max && attr_table[type] == NULL) {
+            attr_table[type] = attr;
         }
-        rta = RTA_NEXT(rta, len);
+        attr = RTA_NEXT(attr, len);
     }
 }
 
-int nl_check_error(const struct nlmsghdr *nlh)
+int nl_check_error_helper(const struct nlmsghdr *nl_header)
 {
-    const struct nlmsgerr *err;
+    const struct nlmsgerr *error_msg;
 
-    if (nlh->nlmsg_type != NLMSG_ERROR) {
+    if (nl_header->nlmsg_type != NLMSG_ERROR) {
         return 0;
     }
-    if (nlh->nlmsg_len < NLMSG_LENGTH(sizeof(*err))) {
+    if (nl_header->nlmsg_len < NLMSG_LENGTH(sizeof(*error_msg))) {
         errno = EBADMSG;
         return -1;
     }
 
-    err = (const struct nlmsgerr *)NLMSG_DATA(nlh);
-    if (err->error == 0) {
+    error_msg = (const struct nlmsgerr *)NLMSG_DATA(nl_header);
+    if (error_msg->error == 0) {
         return 0;
     }
 
-    errno = -err->error;
+    errno = -error_msg->error;
     return -1;
 }
 
-int nl_check_done(const struct nlmsghdr *nlh)
+int nl_check_done_helper(const struct nlmsghdr *nl_header)
 {
-    int err;
+    int error_code;
 
-    if (nlh->nlmsg_len < NLMSG_LENGTH(sizeof(err))) {
+    if (nl_header->nlmsg_len < NLMSG_LENGTH(sizeof(error_code))) {
         return 0;
     }
 
-    memcpy(&err, NLMSG_DATA(nlh), sizeof(err));
-    if (err == 0) {
+    memcpy(&error_code, NLMSG_DATA(nl_header), sizeof(error_code));
+    if (error_code == 0) {
         return 0;
     }
 
-    errno = -err;
+    errno = -error_code;
     return -1;
 }
 
-unsigned int nl_next_seq(void)
+unsigned int nl_next_seq_helper(void)
 {
-    static atomic_uint counter;
+    static pthread_mutex_t counter_lock = PTHREAD_MUTEX_INITIALIZER;
+    static unsigned int counter;
+    unsigned int seq;
 
-    return atomic_fetch_add_explicit(&counter, 1, memory_order_relaxed) + 1;
+    pthread_mutex_lock(&counter_lock);
+    counter += 1;
+    seq = counter;
+    pthread_mutex_unlock(&counter_lock);
+
+    return seq;
 }

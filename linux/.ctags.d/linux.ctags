@@ -1,5 +1,5 @@
---languages=C
---langmap=C:.c.h
+--map-C=+.h
+--map-C++=-.h
 --kinds-C=+px
 --fields=+iaSKlnzt
 --extras=+q

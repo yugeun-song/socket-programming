@@ -18,126 +18,117 @@ static const char *const state_names[13] = { "?",         "ESTABLISHED", "SYN_SE
                                              "FIN_WAIT2", "TIME_WAIT",   "CLOSE",       "CLOSE_WAIT", "LAST_ACK",
                                              "LISTEN",    "CLOSING",     "NEW_SYN_RECV" };
 
-#define DUMP_TIMEOUT_MS 5000
-
 struct diag_request {
-    struct nlmsghdr nlh;
+    struct nlmsghdr nl_header;
     struct inet_diag_req_v2 diag;
 };
 
-static void print_socket(struct nlmsghdr *nlh)
+static void print_socket_helper(struct nlmsghdr *nl_header)
 {
-    char src[INET6_ADDRSTRLEN] = { 0 };
-    char dst[INET6_ADDRSTRLEN] = { 0 };
-    struct inet_diag_msg *msg;
+    char src_text[INET6_ADDRSTRLEN] = { 0 };
+    char dst_text[INET6_ADDRSTRLEN] = { 0 };
+    struct inet_diag_msg *diag_msg;
     const char *state = "?";
 
-    if (nlh->nlmsg_len < NLMSG_LENGTH(sizeof(*msg))) {
+    if (nl_header->nlmsg_len < NLMSG_LENGTH(sizeof(*diag_msg))) {
         return;
     }
 
-    msg = (struct inet_diag_msg *)NLMSG_DATA(nlh);
-    if (inet_ntop(msg->idiag_family, msg->id.idiag_src, src, sizeof(src)) == NULL) {
+    diag_msg = (struct inet_diag_msg *)NLMSG_DATA(nl_header);
+    if (inet_ntop(diag_msg->idiag_family, diag_msg->id.idiag_src, src_text, sizeof(src_text)) == NULL) {
         return;
     }
-    if (inet_ntop(msg->idiag_family, msg->id.idiag_dst, dst, sizeof(dst)) == NULL) {
+    if (inet_ntop(diag_msg->idiag_family, diag_msg->id.idiag_dst, dst_text, sizeof(dst_text)) == NULL) {
         return;
     }
-    if (msg->idiag_state < sizeof(state_names) / sizeof(state_names[0])) {
-        state = state_names[msg->idiag_state];
+    if (diag_msg->idiag_state < sizeof(state_names) / sizeof(state_names[0])) {
+        state = state_names[diag_msg->idiag_state];
     }
 
-    printf("sock_diag_dump: %-12s %15s:%-5u %15s:%-5u uid %-5u inode %u\n", state, src, ntohs(msg->id.idiag_sport), dst,
-           ntohs(msg->id.idiag_dport), msg->idiag_uid, msg->idiag_inode);
+    LOG_RESULT_HELPER("%-12s %15s:%-5u %15s:%-5u uid %-5u inode %u", state, src_text, ntohs(diag_msg->id.idiag_sport),
+                      dst_text, ntohs(diag_msg->id.idiag_dport), diag_msg->idiag_uid, diag_msg->idiag_inode);
 }
 
 int main(void)
 {
-    struct diag_request req = { 0 };
-    char buf[NL_BUF_SIZE];
-    struct nlmsghdr *nlh;
-    struct deadline dl;
+    struct diag_request request = { 0 };
+    char nl_recv_buf[NL_BUF_SIZE_HELPER];
+    struct nlmsghdr *nl_header;
     unsigned int seq;
     unsigned int sockets = 0;
-    ssize_t n;
+    ssize_t received_bytes;
     int is_done = 0;
-    int len;
+    int remaining;
     int fd;
 
-    fd = nl_open(NETLINK_SOCK_DIAG);
+    fd = nl_open_helper(NETLINK_SOCK_DIAG);
     if (fd < 0) {
-        LOG_ERRNO("nl_open(NETLINK_SOCK_DIAG)");
+        LOG_ERRNO_HELPER("nl_open_helper(NETLINK_SOCK_DIAG)");
         return 1;
     }
 
-    seq = nl_next_seq();
-    req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(req.diag));
-    req.nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
-    req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-    req.nlh.nlmsg_seq = seq;
-    req.diag.sdiag_family = AF_INET;
-    req.diag.sdiag_protocol = IPPROTO_TCP;
-    req.diag.idiag_states = ~0U;
+    seq = nl_next_seq_helper();
+    request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(request.diag));
+    request.nl_header.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+    request.nl_header.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    request.nl_header.nlmsg_seq = seq;
+    request.diag.sdiag_family = AF_INET;
+    request.diag.sdiag_protocol = IPPROTO_TCP;
+    request.diag.idiag_states = ~0U;
 
-    if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
-        LOG_ERRNO("nl_send()");
-        close(fd);
-        return 1;
-    }
-
-    if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
-        LOG_ERRNO("clock_gettime()");
+    if (nl_send_helper(fd, &request, request.nl_header.nlmsg_len) < 0) {
+        LOG_ERRNO_HELPER("nl_send_helper()");
         close(fd);
         return 1;
     }
 
     while (!is_done) {
-        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
-        if (n < 0) {
+        received_bytes = nl_recv_or_shutdown_helper(fd, nl_recv_buf, sizeof(nl_recv_buf), NULL);
+        if (received_bytes < 0) {
             if (errno == EINTR) {
                 continue;
             }
-            LOG_ERRNO("nl_recv()");
+            LOG_ERRNO_HELPER("nl_recv_helper()");
             close(fd);
             return 1;
         }
 
-        len = (int)n;
-        nlh = (struct nlmsghdr *)buf;
+        remaining = (int)received_bytes;
+        nl_header = (struct nlmsghdr *)nl_recv_buf;
 
-        while (NLMSG_OK(nlh, len)) {
-            if (nlh->nlmsg_seq != seq) {
-                nlh = NLMSG_NEXT(nlh, len);
+        while (NLMSG_OK(nl_header, remaining)) {
+            if (nl_header->nlmsg_seq != seq) {
+                nl_header = NLMSG_NEXT(nl_header, remaining);
                 continue;
             }
-            if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
-                LOG_MSG("dump raced with a socket change, result is incomplete");
+            if (nl_header->nlmsg_flags & NLM_F_DUMP_INTR) {
+                LOG_MSG_HELPER("dump raced with a socket change, result is incomplete");
                 close(fd);
                 return 1;
             }
-            if (nlh->nlmsg_type == NLMSG_DONE) {
-                if (nl_check_done(nlh) < 0) {
-                    LOG_ERRNO("SOCK_DIAG_BY_FAMILY");
+            if (nl_header->nlmsg_type == NLMSG_DONE) {
+                if (nl_check_done_helper(nl_header) < 0) {
+                    LOG_ERRNO_HELPER("SOCK_DIAG_BY_FAMILY");
                     close(fd);
                     return 1;
                 }
                 is_done = 1;
                 break;
             }
-            if (nl_check_error(nlh) < 0) {
-                LOG_ERRNO("SOCK_DIAG_BY_FAMILY");
+            if (nl_check_error_helper(nl_header) < 0) {
+                LOG_ERRNO_HELPER("SOCK_DIAG_BY_FAMILY");
                 close(fd);
                 return 1;
             }
-            if (nlh->nlmsg_type == SOCK_DIAG_BY_FAMILY) {
-                print_socket(nlh);
+            if (nl_header->nlmsg_type == SOCK_DIAG_BY_FAMILY) {
+                print_socket_helper(nl_header);
                 ++sockets;
             }
-            nlh = NLMSG_NEXT(nlh, len);
+            nl_header = NLMSG_NEXT(nl_header, remaining);
         }
     }
 
-    printf("sock_diag_dump: %u IPv4 TCP sockets\n", sockets);
+    LOG_RESULT_HELPER("%u IPv4 TCP sockets", sockets);
 
     close(fd);
     return 0;

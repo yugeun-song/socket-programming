@@ -11,146 +11,138 @@
 #include "common/log.h"
 #include "netlink/nl_util.h"
 
-#define DUMP_TIMEOUT_MS 5000
-
 struct genl_request {
-    struct nlmsghdr nlh;
+    struct nlmsghdr nl_header;
     struct genlmsghdr genl;
 };
 
-static unsigned int count_nested(struct rtattr *nest)
+static unsigned int count_nested_helper(struct rtattr *nest)
 {
-    struct rtattr *rta;
+    struct rtattr *attr;
     unsigned int count = 0;
-    int len;
+    int remaining;
 
-    rta = (struct rtattr *)RTA_DATA(nest);
-    len = (int)RTA_PAYLOAD(nest);
+    attr = (struct rtattr *)RTA_DATA(nest);
+    remaining = (int)RTA_PAYLOAD(nest);
 
-    while (RTA_OK(rta, len)) {
+    while (RTA_OK(attr, remaining)) {
         ++count;
-        rta = RTA_NEXT(rta, len);
+        attr = RTA_NEXT(attr, remaining);
     }
 
     return count;
 }
 
-static void print_family(struct nlmsghdr *nlh)
+static void print_family_helper(struct nlmsghdr *nl_header)
 {
-    struct rtattr *tb[CTRL_ATTR_MAX + 1];
+    struct rtattr *attr_table[CTRL_ATTR_MAX + 1];
     const char *name = "?";
     unsigned int version = 0;
     unsigned int groups = 0;
     unsigned short id = 0;
 
-    if (nlh->nlmsg_len < NLMSG_LENGTH(GENL_HDRLEN)) {
+    if (nl_header->nlmsg_len < NLMSG_LENGTH(GENL_HDRLEN)) {
         return;
     }
 
-    nl_parse_attrs((struct rtattr *)((char *)NLMSG_DATA(nlh) + GENL_HDRLEN), (int)NLMSG_PAYLOAD(nlh, GENL_HDRLEN), tb, CTRL_ATTR_MAX);
+    nl_parse_attrs_helper((struct rtattr *)((char *)NLMSG_DATA(nl_header) + GENL_HDRLEN),
+                          (int)NLMSG_PAYLOAD(nl_header, GENL_HDRLEN), attr_table, CTRL_ATTR_MAX);
 
-    if (tb[CTRL_ATTR_FAMILY_NAME] != NULL) {
-        name = (const char *)RTA_DATA(tb[CTRL_ATTR_FAMILY_NAME]);
+    if (attr_table[CTRL_ATTR_FAMILY_NAME] != NULL) {
+        name = (const char *)RTA_DATA(attr_table[CTRL_ATTR_FAMILY_NAME]);
     }
-    if (tb[CTRL_ATTR_FAMILY_ID] != NULL) {
-        memcpy(&id, RTA_DATA(tb[CTRL_ATTR_FAMILY_ID]), sizeof(id));
+    if (attr_table[CTRL_ATTR_FAMILY_ID] != NULL) {
+        memcpy(&id, RTA_DATA(attr_table[CTRL_ATTR_FAMILY_ID]), sizeof(id));
     }
-    if (tb[CTRL_ATTR_VERSION] != NULL) {
-        memcpy(&version, RTA_DATA(tb[CTRL_ATTR_VERSION]), sizeof(version));
+    if (attr_table[CTRL_ATTR_VERSION] != NULL) {
+        memcpy(&version, RTA_DATA(attr_table[CTRL_ATTR_VERSION]), sizeof(version));
     }
-    if (tb[CTRL_ATTR_MCAST_GROUPS] != NULL) {
-        groups = count_nested(tb[CTRL_ATTR_MCAST_GROUPS]);
+    if (attr_table[CTRL_ATTR_MCAST_GROUPS] != NULL) {
+        groups = count_nested_helper(attr_table[CTRL_ATTR_MCAST_GROUPS]);
     }
 
-    printf("genl_family_list: id %-4u v%-2u %-20s %u multicast groups\n", id, version, name, groups);
+    LOG_RESULT_HELPER("id %-4u v%-2u %-20s %u multicast groups", id, version, name, groups);
 }
 
 int main(void)
 {
-    struct genl_request req = { 0 };
-    char buf[NL_BUF_SIZE];
-    struct nlmsghdr *nlh;
-    struct deadline dl;
+    struct genl_request request = { 0 };
+    char nl_recv_buf[NL_BUF_SIZE_HELPER];
+    struct nlmsghdr *nl_header;
     unsigned int seq;
     unsigned int families = 0;
-    ssize_t n;
+    ssize_t received_bytes;
     int is_done = 0;
-    int len;
+    int remaining;
     int fd;
 
-    fd = nl_open(NETLINK_GENERIC);
+    fd = nl_open_helper(NETLINK_GENERIC);
     if (fd < 0) {
-        LOG_ERRNO("nl_open(NETLINK_GENERIC)");
+        LOG_ERRNO_HELPER("nl_open_helper(NETLINK_GENERIC)");
         return 1;
     }
 
-    seq = nl_next_seq();
-    req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(req.genl));
-    req.nlh.nlmsg_type = GENL_ID_CTRL;
-    req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-    req.nlh.nlmsg_seq = seq;
-    req.genl.cmd = CTRL_CMD_GETFAMILY;
-    req.genl.version = 1;
+    seq = nl_next_seq_helper();
+    request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(request.genl));
+    request.nl_header.nlmsg_type = GENL_ID_CTRL;
+    request.nl_header.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    request.nl_header.nlmsg_seq = seq;
+    request.genl.cmd = CTRL_CMD_GETFAMILY;
+    request.genl.version = 1;
 
-    if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
-        LOG_ERRNO("nl_send()");
-        close(fd);
-        return 1;
-    }
-
-    if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
-        LOG_ERRNO("clock_gettime()");
+    if (nl_send_helper(fd, &request, request.nl_header.nlmsg_len) < 0) {
+        LOG_ERRNO_HELPER("nl_send_helper()");
         close(fd);
         return 1;
     }
 
     while (!is_done) {
-        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
-        if (n < 0) {
+        received_bytes = nl_recv_or_shutdown_helper(fd, nl_recv_buf, sizeof(nl_recv_buf), NULL);
+        if (received_bytes < 0) {
             if (errno == EINTR) {
                 continue;
             }
-            LOG_ERRNO("nl_recv()");
+            LOG_ERRNO_HELPER("nl_recv_helper()");
             close(fd);
             return 1;
         }
 
-        len = (int)n;
-        nlh = (struct nlmsghdr *)buf;
+        remaining = (int)received_bytes;
+        nl_header = (struct nlmsghdr *)nl_recv_buf;
 
-        while (NLMSG_OK(nlh, len)) {
-            if (nlh->nlmsg_seq != seq) {
-                nlh = NLMSG_NEXT(nlh, len);
+        while (NLMSG_OK(nl_header, remaining)) {
+            if (nl_header->nlmsg_seq != seq) {
+                nl_header = NLMSG_NEXT(nl_header, remaining);
                 continue;
             }
-            if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
-                LOG_MSG("dump raced with a family change, result is incomplete");
+            if (nl_header->nlmsg_flags & NLM_F_DUMP_INTR) {
+                LOG_MSG_HELPER("dump raced with a family change, result is incomplete");
                 close(fd);
                 return 1;
             }
-            if (nlh->nlmsg_type == NLMSG_DONE) {
-                if (nl_check_done(nlh) < 0) {
-                    LOG_ERRNO("CTRL_CMD_GETFAMILY");
+            if (nl_header->nlmsg_type == NLMSG_DONE) {
+                if (nl_check_done_helper(nl_header) < 0) {
+                    LOG_ERRNO_HELPER("CTRL_CMD_GETFAMILY");
                     close(fd);
                     return 1;
                 }
                 is_done = 1;
                 break;
             }
-            if (nl_check_error(nlh) < 0) {
-                LOG_ERRNO("CTRL_CMD_GETFAMILY");
+            if (nl_check_error_helper(nl_header) < 0) {
+                LOG_ERRNO_HELPER("CTRL_CMD_GETFAMILY");
                 close(fd);
                 return 1;
             }
-            if (nlh->nlmsg_type == GENL_ID_CTRL) {
-                print_family(nlh);
+            if (nl_header->nlmsg_type == GENL_ID_CTRL) {
+                print_family_helper(nl_header);
                 ++families;
             }
-            nlh = NLMSG_NEXT(nlh, len);
+            nl_header = NLMSG_NEXT(nl_header, remaining);
         }
     }
 
-    printf("genl_family_list: %u generic netlink families\n", families);
+    LOG_RESULT_HELPER("%u generic netlink families", families);
 
     close(fd);
     return 0;

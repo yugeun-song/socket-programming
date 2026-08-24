@@ -13,15 +13,12 @@
 
 #include <linux/errqueue.h>
 
-#include "common/deadline.h"
 #include "common/log.h"
 #include "common/net_util.h"
 
-#define PORT 5002
-#define CHUNK_SIZE (256 * 1024)
-#define CHUNK_COUNT 16
-#define DRAIN_TIMEOUT_MS 2000
-#define IDLE_TIMEOUT_MS 5000
+#define PORT_HELPER 5002
+#define CHUNK_SIZE_HELPER (256 * 1024)
+#define CHUNK_COUNT_HELPER 16
 
 union zc_control {
     char raw[CMSG_SPACE(sizeof(struct sock_extended_err) + sizeof(struct sockaddr_in))];
@@ -33,29 +30,16 @@ struct zc_stats {
     unsigned int copied;
 };
 
-static int drain_completions(int fd, const struct deadline *dl, struct zc_stats *stats)
+static int drain_completions_helper(int fd, int should_wait, const sigset_t *wait_signal_mask, struct zc_stats *stats)
 {
-    struct sock_extended_err serr;
+    struct sock_extended_err sock_err;
     struct msghdr msg = { 0 };
     union zc_control control;
     struct cmsghdr *cmsg;
-    unsigned int range;
-    int ready;
+    unsigned int copied_range;
 
-    while (1) {
-        ready = poll_until(fd, POLLERR, dl, NULL);
-        if (ready >= 0) {
-            break;
-        }
-        if (errno != EINTR) {
-            return -1;
-        }
-        if (deadline_expired(dl)) {
-            return 0;
-        }
-    }
-    if (ready == 0) {
-        return 0;
+    if (should_wait && wait_ready_or_shutdown_helper(fd, POLLERR, wait_signal_mask) < 0) {
+        return -1;
     }
 
     msg.msg_control = control.raw;
@@ -64,11 +48,9 @@ static int drain_completions(int fd, const struct deadline *dl, struct zc_stats 
     while (1) {
         if (recvmsg(fd, &msg, MSG_ERRQUEUE) >= 0) {
             break;
-        }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return 0;
-        }
-        if (errno != EINTR) {
+        } else if (errno != EINTR) {
             return -1;
         }
     }
@@ -79,16 +61,16 @@ static int drain_completions(int fd, const struct deadline *dl, struct zc_stats 
         return -1;
     }
 
-    memcpy(&serr, CMSG_DATA(cmsg), sizeof(serr));
-    if (serr.ee_errno != 0 || serr.ee_origin != SO_EE_ORIGIN_ZEROCOPY) {
+    memcpy(&sock_err, CMSG_DATA(cmsg), sizeof(sock_err));
+    if (sock_err.ee_errno != 0 || sock_err.ee_origin != SO_EE_ORIGIN_ZEROCOPY) {
         errno = EPROTO;
         return -1;
     }
 
-    range = serr.ee_data - serr.ee_info + 1;
-    stats->completed += range;
-    if (serr.ee_code & SO_EE_CODE_ZEROCOPY_COPIED) {
-        stats->copied += range;
+    copied_range = sock_err.ee_data - sock_err.ee_info + 1;
+    stats->completed += copied_range;
+    if (sock_err.ee_code & SO_EE_CODE_ZEROCOPY_COPIED) {
+        stats->copied += copied_range;
     }
     return 1;
 }
@@ -96,121 +78,92 @@ static int drain_completions(int fd, const struct deadline *dl, struct zc_stats 
 int main(int argc, char **argv)
 {
     const char *host = (argc > 1) ? argv[1] : "127.0.0.1";
-    char peer[PEER_TEXT_MAX] = { 0 };
+    char log_buf[ADDR_TEXT_MAX_HELPER] = { 0 };
     struct zc_stats stats = { 0 };
     unsigned long long sent = 0;
     unsigned int pending = 0;
-    struct deadline connect_dl;
-    struct deadline probe_dl;
-    struct deadline drain_dl;
-    struct deadline send_dl;
     int has_failed = 0;
-    int enable = 1;
-    char *chunk;
-    size_t off;
-    ssize_t n;
-    int drained;
+    int zerocopy_enable = 1;
+    char *send_buf;
+    size_t offset;
+    ssize_t sent_bytes;
+    int drain_status;
     int fd;
     int i;
 
-    chunk = malloc(CHUNK_SIZE);
-    if (chunk == NULL) {
-        LOG_ERRNO("malloc()");
+    send_buf = malloc(CHUNK_SIZE_HELPER);
+    if (send_buf == NULL) {
+        LOG_ERRNO_HELPER("malloc()");
         return 1;
     }
-    memset(chunk, 'z', CHUNK_SIZE);
+    memset(send_buf, 'z', CHUNK_SIZE_HELPER);
 
-    if (deadline_start(&probe_dl, 0) < 0) {
-        LOG_ERRNO("clock_gettime()");
-        free(chunk);
-        return 1;
-    }
-
-    if (deadline_start(&connect_dl, IDLE_TIMEOUT_MS) < 0) {
-        LOG_ERRNO("clock_gettime()");
-        free(chunk);
-        return 1;
-    }
-
-    fd = tcp_connect(host, PORT, &connect_dl);
+    fd = tcp_connect_helper(host, PORT_HELPER);
     if (fd < 0) {
-        LOG_ERRNO("tcp_connect()");
-        free(chunk);
+        LOG_ERRNO_HELPER("tcp_connect_helper()");
+        free(send_buf);
         return 1;
     }
-    if (format_peer(fd, peer, sizeof(peer)) < 0) {
-        LOG_ERRNO("format_peer()");
+    if (format_peer_helper(fd, log_buf, sizeof(log_buf)) < 0) {
+        LOG_ERRNO_HELPER("format_peer_helper()");
         close(fd);
-        free(chunk);
+        free(send_buf);
         return 1;
     }
 
-    LOG_MSG("connected to %s", peer);
+    LOG_MSG_HELPER("connected to %s", log_buf);
 
-    if (setsockopt(fd, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof(enable)) < 0) {
-        LOG_ERRNO("setsockopt(SO_ZEROCOPY)");
+    if (setsockopt(fd, SOL_SOCKET, SO_ZEROCOPY, &zerocopy_enable, sizeof(zerocopy_enable)) < 0) {
+        LOG_ERRNO_HELPER("setsockopt(SO_ZEROCOPY)");
         close(fd);
-        free(chunk);
+        free(send_buf);
         return 1;
     }
 
-    for (i = 0; i < CHUNK_COUNT && !has_failed; ++i) {
-        off = 0;
-        while (off < CHUNK_SIZE) {
-            if (deadline_start(&send_dl, IDLE_TIMEOUT_MS) < 0) {
-                LOG_ERRNO("clock_gettime()");
-                has_failed = 1;
-                break;
-            }
-            if (wait_ready(fd, POLLOUT, &send_dl, NULL) < 0) {
-                LOG_ERRNO("wait_ready()");
+    for (i = 0; i < CHUNK_COUNT_HELPER && !has_failed; ++i) {
+        offset = 0;
+        while (offset < CHUNK_SIZE_HELPER) {
+            if (wait_ready_or_shutdown_helper(fd, POLLOUT, NULL) < 0) {
+                LOG_ERRNO_HELPER("wait_ready_or_shutdown_helper()");
                 has_failed = 1;
                 break;
             }
 
-            n = send(fd, chunk + off, CHUNK_SIZE - off, MSG_ZEROCOPY | MSG_NOSIGNAL);
-            if (n < 0) {
+            sent_bytes = send(fd, send_buf + offset, CHUNK_SIZE_HELPER - offset, MSG_ZEROCOPY | MSG_NOSIGNAL);
+            if (sent_bytes < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
                 }
-                LOG_ERRNO("send()");
+                LOG_ERRNO_HELPER("send()");
                 has_failed = 1;
                 break;
             }
-            off += (size_t)n;
+            offset += (size_t)sent_bytes;
             ++pending;
         }
-        sent += off;
+        sent += offset;
 
-        if (drain_completions(fd, &probe_dl, &stats) < 0) {
-            LOG_ERRNO("recvmsg(MSG_ERRQUEUE)");
+        if (drain_completions_helper(fd, 0, NULL, &stats) < 0) {
+            LOG_ERRNO_HELPER("recvmsg(MSG_ERRQUEUE)");
             has_failed = 1;
         }
     }
 
-    if (deadline_start(&drain_dl, DRAIN_TIMEOUT_MS) < 0) {
-        LOG_ERRNO("clock_gettime()");
-        close(fd);
-        free(chunk);
-        return 1;
-    }
-
     while (stats.completed < pending) {
-        drained = drain_completions(fd, &drain_dl, &stats);
-        if (drained < 0) {
-            LOG_ERRNO("recvmsg(MSG_ERRQUEUE)");
+        drain_status = drain_completions_helper(fd, 1, NULL, &stats);
+        if (drain_status < 0) {
+            LOG_ERRNO_HELPER("recvmsg(MSG_ERRQUEUE)");
             break;
-        }
-        if (drained == 0) {
-            LOG_MSG("%u notifications missing", pending - stats.completed);
+        } else if (drain_status == 0) {
+            LOG_MSG_HELPER("%u notifications missing", pending - stats.completed);
             break;
         }
     }
 
-    printf("msg_zerocopy_client: sent %llu bytes to %s in %u zero-copy send() calls\n", sent, peer, pending);
-    printf("msg_zerocopy_client: %u notifications, %u ranges the kernel copied\n", stats.completed, stats.copied);
+    LOG_RESULT_HELPER("sent %llu bytes to %s in %u zero-copy send() calls", sent, log_buf, pending);
+    LOG_RESULT_HELPER("%u notifications, %u ranges the kernel copied", stats.completed, stats.copied);
 
     close(fd);
-    free(chunk);
+    free(send_buf);
     return has_failed ? 1 : 0;
 }

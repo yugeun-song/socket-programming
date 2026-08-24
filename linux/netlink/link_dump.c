@@ -18,16 +18,14 @@
 #include "common/log.h"
 #include "netlink/nl_util.h"
 
-#define DUMP_TIMEOUT_MS 5000
-
 union link_request {
-    struct nlmsghdr nlh;
+    struct nlmsghdr nl_header;
     char raw[NLMSG_SPACE(sizeof(struct ifinfomsg)) + RTA_SPACE(sizeof(unsigned int))];
 };
 
-static const char *link_type(unsigned short type)
+static const char *link_type_helper(unsigned short arp_type)
 {
-    switch (type) {
+    switch (arp_type) {
     case ARPHRD_ETHER:
         return "ether";
     case ARPHRD_LOOPBACK:
@@ -47,132 +45,129 @@ static const char *link_type(unsigned short type)
     }
 }
 
-static void print_link(struct nlmsghdr *nlh)
+static void print_link_helper(struct nlmsghdr *nl_header)
 {
-    struct rtattr *tb[IFLA_MAX + 1];
-    char hwaddr[32] = { 0 };
-    const unsigned char *mac;
-    struct ifinfomsg *ifi;
-    const char *name = "?";
+    struct rtattr *attr_table[IFLA_MAX + 1];
+    char mac_field[32] = { 0 };
+    const unsigned char *mac_bytes;
+    struct ifinfomsg *link_info;
+    const char *link_name = "?";
     unsigned int mtu = 0;
-    char line[256];
+    char output_line[256];
 
-    ifi = (struct ifinfomsg *)NLMSG_DATA(nlh);
-    nl_parse_attrs(IFLA_RTA(ifi), (int)IFLA_PAYLOAD(nlh), tb, IFLA_MAX);
+    link_info = (struct ifinfomsg *)NLMSG_DATA(nl_header);
+    nl_parse_attrs_helper(IFLA_RTA(link_info), (int)IFLA_PAYLOAD(nl_header), attr_table, IFLA_MAX);
 
-    if (tb[IFLA_IFNAME] != NULL) {
-        name = (const char *)RTA_DATA(tb[IFLA_IFNAME]);
+    if (attr_table[IFLA_IFNAME] != NULL) {
+        link_name = (const char *)RTA_DATA(attr_table[IFLA_IFNAME]);
     }
-    if (tb[IFLA_MTU] != NULL) {
-        memcpy(&mtu, RTA_DATA(tb[IFLA_MTU]), sizeof(mtu));
+    if (attr_table[IFLA_MTU] != NULL) {
+        memcpy(&mtu, RTA_DATA(attr_table[IFLA_MTU]), sizeof(mtu));
     }
-    if (tb[IFLA_ADDRESS] != NULL && RTA_PAYLOAD(tb[IFLA_ADDRESS]) == ETH_ALEN) {
-        mac = (const unsigned char *)RTA_DATA(tb[IFLA_ADDRESS]);
-        snprintf(hwaddr, sizeof(hwaddr), " mac %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    if (attr_table[IFLA_ADDRESS] != NULL && RTA_PAYLOAD(attr_table[IFLA_ADDRESS]) == ETH_ALEN) {
+        mac_bytes = (const unsigned char *)RTA_DATA(attr_table[IFLA_ADDRESS]);
+        /* clang-format off */
+        snprintf(mac_field, sizeof(mac_field), " mac %02x:%02x:%02x:%02x:%02x:%02x",
+                 mac_bytes[0], mac_bytes[1], mac_bytes[2], mac_bytes[3], mac_bytes[4], mac_bytes[5]);
+        /* clang-format on */
     }
 
-    snprintf(line, sizeof(line), "link_dump: %2d %-10s %-9s mtu %-6u %s%s%s", ifi->ifi_index, name, link_type(ifi->ifi_type),
-             mtu, (ifi->ifi_flags & IFF_UP) ? "UP" : "DOWN", (ifi->ifi_flags & IFF_RUNNING) ? ",RUNNING" : "", hwaddr);
-    printf("%s\n", line);
+    snprintf(output_line, sizeof(output_line), "%2d %-10s %-9s mtu %-6u %s%s%s", link_info->ifi_index, link_name,
+             link_type_helper(link_info->ifi_type), mtu, (link_info->ifi_flags & IFF_UP) ? "UP" : "DOWN",
+             (link_info->ifi_flags & IFF_RUNNING) ? ",RUNNING" : "", mac_field);
+    LOG_RESULT_HELPER("%s", output_line);
 }
 
 int main(void)
 {
     unsigned int ext_mask = RTEXT_FILTER_VF;
-    union link_request req;
-    char buf[NL_BUF_SIZE];
-    struct ifinfomsg *ifi;
-    struct nlmsghdr *nlh;
-    struct deadline dl;
+    union link_request request;
+    char nl_recv_buf[NL_BUF_SIZE_HELPER];
+    struct ifinfomsg *link_info;
+    struct nlmsghdr *nl_header;
     unsigned int seq;
     unsigned int links = 0;
-    ssize_t n;
+    ssize_t received_bytes;
     int is_done = 0;
-    int len;
+    int remaining;
     int fd;
 
-    fd = nl_open(NETLINK_ROUTE);
+    fd = nl_open_helper(NETLINK_ROUTE);
     if (fd < 0) {
-        LOG_ERRNO("nl_open()");
+        LOG_ERRNO_HELPER("nl_open_helper()");
         return 1;
     }
 
-    memset(&req, 0, sizeof(req));
+    memset(&request, 0, sizeof(request));
 
-    seq = nl_next_seq();
-    req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(*ifi));
-    req.nlh.nlmsg_type = RTM_GETLINK;
-    req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-    req.nlh.nlmsg_seq = seq;
+    seq = nl_next_seq_helper();
+    request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(*link_info));
+    request.nl_header.nlmsg_type = RTM_GETLINK;
+    request.nl_header.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    request.nl_header.nlmsg_seq = seq;
 
-    ifi = (struct ifinfomsg *)NLMSG_DATA(&req.nlh);
-    ifi->ifi_family = AF_UNSPEC;
+    link_info = (struct ifinfomsg *)NLMSG_DATA(&request.nl_header);
+    link_info->ifi_family = AF_UNSPEC;
 
-    if (nl_add_attr(&req.nlh, sizeof(req), IFLA_EXT_MASK, &ext_mask, sizeof(ext_mask)) < 0) {
-        LOG_ERRNO("nl_add_attr(IFLA_EXT_MASK)");
+    if (nl_add_attr_helper(&request.nl_header, sizeof(request), IFLA_EXT_MASK, &ext_mask, sizeof(ext_mask)) < 0) {
+        LOG_ERRNO_HELPER("nl_add_attr_helper(IFLA_EXT_MASK)");
         close(fd);
         return 1;
     }
 
-    if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
-        LOG_ERRNO("nl_send()");
-        close(fd);
-        return 1;
-    }
-
-    if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
-        LOG_ERRNO("clock_gettime()");
+    if (nl_send_helper(fd, &request, request.nl_header.nlmsg_len) < 0) {
+        LOG_ERRNO_HELPER("nl_send_helper()");
         close(fd);
         return 1;
     }
 
     while (!is_done) {
-        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
-        if (n < 0) {
+        received_bytes = nl_recv_or_shutdown_helper(fd, nl_recv_buf, sizeof(nl_recv_buf), NULL);
+        if (received_bytes < 0) {
             if (errno == EINTR) {
                 continue;
             }
-            LOG_ERRNO("nl_recv()");
+            LOG_ERRNO_HELPER("nl_recv_helper()");
             close(fd);
             return 1;
         }
 
-        len = (int)n;
-        nlh = (struct nlmsghdr *)buf;
+        remaining = (int)received_bytes;
+        nl_header = (struct nlmsghdr *)nl_recv_buf;
 
-        while (NLMSG_OK(nlh, len)) {
-            if (nlh->nlmsg_seq != seq) {
-                nlh = NLMSG_NEXT(nlh, len);
+        while (NLMSG_OK(nl_header, remaining)) {
+            if (nl_header->nlmsg_seq != seq) {
+                nl_header = NLMSG_NEXT(nl_header, remaining);
                 continue;
             }
-            if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
-                LOG_MSG("dump raced with a link change, result is incomplete");
+            if (nl_header->nlmsg_flags & NLM_F_DUMP_INTR) {
+                LOG_MSG_HELPER("dump raced with a link change, result is incomplete");
                 close(fd);
                 return 1;
             }
-            if (nlh->nlmsg_type == NLMSG_DONE) {
-                if (nl_check_done(nlh) < 0) {
-                    LOG_ERRNO("RTM_GETLINK");
+            if (nl_header->nlmsg_type == NLMSG_DONE) {
+                if (nl_check_done_helper(nl_header) < 0) {
+                    LOG_ERRNO_HELPER("RTM_GETLINK");
                     close(fd);
                     return 1;
                 }
                 is_done = 1;
                 break;
             }
-            if (nl_check_error(nlh) < 0) {
-                LOG_ERRNO("RTM_GETLINK");
+            if (nl_check_error_helper(nl_header) < 0) {
+                LOG_ERRNO_HELPER("RTM_GETLINK");
                 close(fd);
                 return 1;
             }
-            if (nlh->nlmsg_type == RTM_NEWLINK) {
-                print_link(nlh);
+            if (nl_header->nlmsg_type == RTM_NEWLINK) {
+                print_link_helper(nl_header);
                 ++links;
             }
-            nlh = NLMSG_NEXT(nlh, len);
+            nl_header = NLMSG_NEXT(nl_header, remaining);
         }
     }
 
-    printf("link_dump: %u links\n", links);
+    LOG_RESULT_HELPER("%u links", links);
 
     close(fd);
     return 0;

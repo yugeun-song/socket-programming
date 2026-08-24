@@ -23,7 +23,7 @@ AllowShortFunctionsOnASingleLine: None
 AllowShortEnumsOnASingleLine: false
 PointerAlignment: Right
 ColumnLimit: 120
-PenaltyExcessCharacter: 1
+PenaltyBreakAssignment: 100
 Cpp11BracedListStyle: false
 SortIncludes: CaseSensitive
 IncludeBlocks: Regroup

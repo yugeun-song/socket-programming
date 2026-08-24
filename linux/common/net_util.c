@@ -3,7 +3,6 @@
 #include "common/net_util.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <poll.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -13,42 +12,36 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-static volatile sig_atomic_t g_stop_signal;
+static volatile sig_atomic_t g_shutdown_signal_number;
 
-static void on_stop(int signo)
+static void on_shutdown_signal_helper(int signal_number)
 {
-    g_stop_signal = signo;
+    g_shutdown_signal_number = signal_number;
 }
 
-static int bind_inet(int type, unsigned short port, int level, int optname, const void *optval, socklen_t optlen)
+static int bind_inet_helper(int sock_type, unsigned short port)
 {
-    struct sockaddr_in addr = { 0 };
+    struct sockaddr_in local_addr = { 0 };
     int reuse_enable = 1;
     int saved_errno;
     int fd;
 
-    fd = socket(AF_INET, type | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    fd = socket(AF_INET, sock_type | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0) {
         return -1;
     }
 
-    if (optval == NULL || optlen == 0) {
-        level = SOL_SOCKET;
-        optname = SO_REUSEADDR;
-        optval = &reuse_enable;
-        optlen = sizeof(reuse_enable);
-    }
-    if (setsockopt(fd, level, optname, optval, optlen) < 0) {
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse_enable, sizeof(reuse_enable)) < 0) {
         saved_errno = errno;
         close(fd);
         errno = saved_errno;
         return -1;
     }
 
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    local_addr.sin_family = AF_INET;
+    local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    local_addr.sin_port = htons(port);
+    if (bind(fd, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0) {
         saved_errno = errno;
         close(fd);
         errno = saved_errno;
@@ -58,51 +51,51 @@ static int bind_inet(int type, unsigned short port, int level, int optname, cons
     return fd;
 }
 
-static int wait_connected(int fd, const struct deadline *dl)
+static int wait_connected_helper(int fd)
 {
-    socklen_t errlen = sizeof(int);
-    int err = 0;
+    socklen_t sock_error_len = sizeof(int);
+    int sock_error = 0;
 
-    if (wait_ready(fd, POLLOUT, dl, NULL) < 0) {
+    if (wait_ready_or_shutdown_helper(fd, POLLOUT, NULL) < 0) {
         return -1;
     }
-    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen) < 0) {
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &sock_error, &sock_error_len) < 0) {
         return -1;
     }
-    if (err != 0) {
-        errno = err;
+    if (sock_error != 0) {
+        errno = sock_error;
         return -1;
     }
     return 0;
 }
 
-static int connect_inet(int type, const char *host, unsigned short port, const struct deadline *dl)
+static int connect_inet_helper(int sock_type, const char *host, unsigned short port)
 {
-    struct sockaddr_in addr = { 0 };
+    struct sockaddr_in peer_addr = { 0 };
     int saved_errno;
     int fd;
 
-    fd = socket(AF_INET, type | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    fd = socket(AF_INET, sock_type | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0) {
         return -1;
     }
 
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
+    peer_addr.sin_family = AF_INET;
+    peer_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &peer_addr.sin_addr) != 1) {
         close(fd);
         errno = EINVAL;
         return -1;
     }
 
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (connect(fd, (struct sockaddr *)&peer_addr, sizeof(peer_addr)) < 0) {
         if (errno != EINPROGRESS && errno != EINTR) {
             saved_errno = errno;
             close(fd);
             errno = saved_errno;
             return -1;
         }
-        if (wait_connected(fd, dl) < 0) {
+        if (wait_connected_helper(fd) < 0) {
             saved_errno = errno;
             close(fd);
             errno = saved_errno;
@@ -113,12 +106,12 @@ static int connect_inet(int type, const char *host, unsigned short port, const s
     return fd;
 }
 
-int tcp_listen(unsigned short port, int backlog, int level, int optname, const void *optval, socklen_t optlen)
+int tcp_listen_helper(unsigned short port, int backlog)
 {
     int saved_errno;
     int fd;
 
-    fd = bind_inet(SOCK_STREAM, port, level, optname, optval, optlen);
+    fd = bind_inet_helper(SOCK_STREAM, port);
     if (fd < 0) {
         return -1;
     }
@@ -133,23 +126,23 @@ int tcp_listen(unsigned short port, int backlog, int level, int optname, const v
     return fd;
 }
 
-int tcp_connect(const char *host, unsigned short port, const struct deadline *dl)
+int tcp_connect_helper(const char *host, unsigned short port)
 {
-    return connect_inet(SOCK_STREAM, host, port, dl);
+    return connect_inet_helper(SOCK_STREAM, host, port);
 }
 
-int tcp_accept(int listen_fd, struct sockaddr_in *peer, const struct deadline *dl, const sigset_t *mask)
+int tcp_accept_helper(int server_fd, struct sockaddr_in *peer_addr, const sigset_t *wait_signal_mask)
 {
-    socklen_t peerlen;
+    socklen_t peer_addr_len;
     int fd;
 
     while (1) {
-        if (wait_ready(listen_fd, POLLIN, dl, mask) < 0) {
+        if (wait_ready_or_shutdown_helper(server_fd, POLLIN, wait_signal_mask) < 0) {
             return -1;
         }
 
-        peerlen = sizeof(*peer);
-        fd = accept4(listen_fd, (struct sockaddr *)peer, &peerlen, SOCK_CLOEXEC | SOCK_NONBLOCK);
+        peer_addr_len = sizeof(*peer_addr);
+        fd = accept4(server_fd, (struct sockaddr *)peer_addr, &peer_addr_len, SOCK_CLOEXEC | SOCK_NONBLOCK);
         if (fd >= 0) {
             break;
         }
@@ -158,7 +151,7 @@ int tcp_accept(int listen_fd, struct sockaddr_in *peer, const struct deadline *d
         }
     }
 
-    if (peerlen != sizeof(*peer) || peer->sin_family != AF_INET) {
+    if (peer_addr_len != sizeof(*peer_addr) || peer_addr->sin_family != AF_INET) {
         close(fd);
         errno = EAFNOSUPPORT;
         return -1;
@@ -167,61 +160,51 @@ int tcp_accept(int listen_fd, struct sockaddr_in *peer, const struct deadline *d
     return fd;
 }
 
-int udp_bind(unsigned short port, int level, int optname, const void *optval, socklen_t optlen)
+int udp_bind_helper(unsigned short port)
 {
-    return bind_inet(SOCK_DGRAM, port, level, optname, optval, optlen);
+    return bind_inet_helper(SOCK_DGRAM, port);
 }
 
-int udp_connect(const char *host, unsigned short port)
+int udp_connect_helper(const char *host, unsigned short port)
 {
-    struct deadline dl;
-
-    if (deadline_start(&dl, DEADLINE_FOREVER) < 0) {
-        return -1;
-    }
-    return connect_inet(SOCK_DGRAM, host, port, &dl);
+    return connect_inet_helper(SOCK_DGRAM, host, port);
 }
 
-int wait_ready(int fd, short events, const struct deadline *dl, const sigset_t *mask)
+int wait_ready_or_shutdown_helper(int fd, short events, const sigset_t *wait_signal_mask)
 {
-    int ready;
+    struct pollfd poll_target = { 0 };
+    int poll_status;
+
+    poll_target.fd = fd;
+    poll_target.events = events;
 
     while (1) {
-        if (stop_requested()) {
-            errno = ECANCELED;
-            return -1;
-        }
-        if (deadline_expired(dl)) {
-            errno = ETIMEDOUT;
+        if (should_shut_down_helper()) {
             return -1;
         }
 
-        ready = poll_until(fd, events, dl, mask);
-        if (ready > 0) {
-            return ready;
+        poll_status = ppoll(&poll_target, 1, NULL, wait_signal_mask);
+        if (poll_status > 0) {
+            return poll_status;
         }
-        if (ready == 0) {
-            errno = ETIMEDOUT;
-            return -1;
-        }
-        if (errno != EINTR) {
+        if (poll_status < 0 && errno != EINTR) {
             return -1;
         }
     }
 }
 
-ssize_t recv_until(int fd, void *buf, size_t len, const struct deadline *dl, const sigset_t *mask)
+ssize_t recv_or_shutdown_helper(int fd, void *recv_buf, size_t len, const sigset_t *wait_signal_mask)
 {
-    ssize_t n;
+    ssize_t received_bytes;
 
     while (1) {
-        if (wait_ready(fd, POLLIN, dl, mask) < 0) {
+        if (wait_ready_or_shutdown_helper(fd, POLLIN, wait_signal_mask) < 0) {
             return -1;
         }
 
-        n = recv(fd, buf, len, 0);
-        if (n >= 0) {
-            return n;
+        received_bytes = recv(fd, recv_buf, len, 0);
+        if (received_bytes >= 0) {
+            return received_bytes;
         }
         if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
             return -1;
@@ -229,24 +212,25 @@ ssize_t recv_until(int fd, void *buf, size_t len, const struct deadline *dl, con
     }
 }
 
-ssize_t recvfrom_until(int fd, void *buf, size_t len, struct sockaddr_in *peer, const struct deadline *dl, const sigset_t *mask)
+ssize_t recvfrom_or_shutdown_helper(int fd, void *recv_buf, size_t len, struct sockaddr_in *peer_addr,
+                                    const sigset_t *wait_signal_mask)
 {
-    socklen_t peerlen;
-    ssize_t n;
+    ssize_t received_bytes;
+    socklen_t peer_addr_len;
 
     while (1) {
-        if (wait_ready(fd, POLLIN, dl, mask) < 0) {
+        if (wait_ready_or_shutdown_helper(fd, POLLIN, wait_signal_mask) < 0) {
             return -1;
         }
 
-        peerlen = sizeof(*peer);
-        n = recvfrom(fd, buf, len, 0, (struct sockaddr *)peer, &peerlen);
-        if (n >= 0) {
-            if (peerlen != sizeof(*peer) || peer->sin_family != AF_INET) {
+        peer_addr_len = sizeof(*peer_addr);
+        received_bytes = recvfrom(fd, recv_buf, len, 0, (struct sockaddr *)peer_addr, &peer_addr_len);
+        if (received_bytes >= 0) {
+            if (peer_addr_len != sizeof(*peer_addr) || peer_addr->sin_family != AF_INET) {
                 errno = EAFNOSUPPORT;
                 return -1;
             }
-            return n;
+            return received_bytes;
         }
         if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
             return -1;
@@ -254,46 +238,30 @@ ssize_t recvfrom_until(int fd, void *buf, size_t len, struct sockaddr_in *peer, 
     }
 }
 
-int send_all_until(int fd, const void *buf, size_t len, const struct deadline *dl, const sigset_t *mask)
+int send_all_or_shutdown_helper(int fd, const void *send_buf, size_t len, const sigset_t *wait_signal_mask)
 {
-    const char *p = (const char *)buf;
-    size_t sent = 0;
-    ssize_t n;
+    const char *data = (const char *)send_buf;
+    size_t sent_total = 0;
+    ssize_t sent_bytes;
 
-    while (sent < len) {
-        if (wait_ready(fd, POLLOUT, dl, mask) < 0) {
+    while (sent_total < len) {
+        if (wait_ready_or_shutdown_helper(fd, POLLOUT, wait_signal_mask) < 0) {
             return -1;
         }
 
-        n = send(fd, p + sent, len - sent, MSG_NOSIGNAL);
-        if (n < 0) {
+        sent_bytes = send(fd, data + sent_total, len - sent_total, MSG_NOSIGNAL);
+        if (sent_bytes < 0) {
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
             return -1;
         }
-        sent += (size_t)n;
+        sent_total += (size_t)sent_bytes;
     }
     return 0;
 }
 
-int set_nonblocking(int fd, int enable)
-{
-    int flags;
-
-    flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) {
-        return -1;
-    }
-    if (enable) {
-        flags |= O_NONBLOCK;
-    } else {
-        flags &= ~O_NONBLOCK;
-    }
-    return fcntl(fd, F_SETFL, flags);
-}
-
-int format_addr(const struct sockaddr_in *addr, char *out, size_t len)
+int format_addr_helper(const struct sockaddr_in *addr, char *out, size_t len)
 {
     char host[INET_ADDRSTRLEN] = { 0 };
 
@@ -306,22 +274,22 @@ int format_addr(const struct sockaddr_in *addr, char *out, size_t len)
     return 0;
 }
 
-int format_peer(int fd, char *out, size_t len)
+int format_peer_helper(int fd, char *out, size_t len)
 {
-    struct sockaddr_in addr = { 0 };
-    socklen_t addrlen = sizeof(addr);
+    struct sockaddr_in peer_addr = { 0 };
+    socklen_t peer_addr_len = sizeof(peer_addr);
 
-    if (getpeername(fd, (struct sockaddr *)&addr, &addrlen) < 0) {
+    if (getpeername(fd, (struct sockaddr *)&peer_addr, &peer_addr_len) < 0) {
         return -1;
     }
-    if (addrlen != sizeof(addr) || addr.sin_family != AF_INET) {
+    if (peer_addr_len != sizeof(peer_addr) || peer_addr.sin_family != AF_INET) {
         errno = EAFNOSUPPORT;
         return -1;
     }
-    return format_addr(&addr, out, len);
+    return format_addr_helper(&peer_addr, out, len);
 }
 
-int install_signal_handler(int signo, void (*handler)(int), int flags)
+int register_signal_handler_helper(int signal_number, void (*handler)(int), int flags)
 {
     struct sigaction sa = { 0 };
 
@@ -330,49 +298,48 @@ int install_signal_handler(int signo, void (*handler)(int), int flags)
     if (sigemptyset(&sa.sa_mask) < 0) {
         return -1;
     }
-    return sigaction(signo, &sa, NULL);
+    return sigaction(signal_number, &sa, NULL);
 }
 
-int ignore_sigpipe(void)
+int ignore_sigpipe_helper(void)
 {
-    return install_signal_handler(SIGPIPE, SIG_IGN, SIGNAL_INTERRUPTS);
+    return register_signal_handler_helper(SIGPIPE, SIG_IGN, 0);
 }
 
-int install_stop_handlers(sigset_t *saved)
+int catch_shutdown_signals_helper(sigset_t *wait_signal_mask)
 {
-    static const int stop_signals[] = { SIGINT, SIGTERM };
-
-    if (install_signal_handler(SIGINT, on_stop, SIGNAL_INTERRUPTS) < 0) {
-        return -1;
-    }
-    if (install_signal_handler(SIGTERM, on_stop, SIGNAL_INTERRUPTS) < 0) {
-        return -1;
-    }
-    return block_signals(stop_signals, sizeof(stop_signals) / sizeof(stop_signals[0]), saved);
-}
-
-int block_signals(const int *signos, size_t count, sigset_t *saved)
-{
-    sigset_t blocked;
+    static const int shutdown_signals[] = { SIGINT, SIGTERM };
+    sigset_t signals_to_block;
     size_t i;
+    int mask_error_code;
 
-    if (sigemptyset(&blocked) < 0) {
+    if (sigemptyset(&signals_to_block) < 0) {
         return -1;
     }
-    for (i = 0; i < count; ++i) {
-        if (sigaddset(&blocked, signos[i]) < 0) {
+
+    for (i = 0; i < sizeof(shutdown_signals) / sizeof(shutdown_signals[0]); ++i) {
+        if (register_signal_handler_helper(shutdown_signals[i], on_shutdown_signal_helper, 0) < 0) {
+            return -1;
+        }
+        if (sigaddset(&signals_to_block, shutdown_signals[i]) < 0) {
             return -1;
         }
     }
-    return pthread_sigmask(SIG_BLOCK, &blocked, saved);
+
+    mask_error_code = pthread_sigmask(SIG_BLOCK, &signals_to_block, wait_signal_mask);
+    if (mask_error_code != 0) {
+        errno = mask_error_code;
+        return -1;
+    }
+    return 0;
 }
 
-int stop_requested(void)
+int should_shut_down_helper(void)
 {
-    return g_stop_signal != 0;
+    return g_shutdown_signal_number != 0;
 }
 
-int stop_signal(void)
+int which_shutdown_signal_helper(void)
 {
-    return (int)g_stop_signal;
+    return (int)g_shutdown_signal_number;
 }

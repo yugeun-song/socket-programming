@@ -28,46 +28,43 @@
 #include "common/log.h"
 #include "netlink/nl_util.h"
 
-#define DUMP_TIMEOUT_MS 5000
-#define ACK_TIMEOUT_MS 5000
-
 struct addr_request {
-    struct nlmsghdr nlh;
-    struct ifaddrmsg ifa;
+    struct nlmsghdr nl_header;
+    struct ifaddrmsg addr_info;
 };
 
 union addr_change {
-    struct nlmsghdr nlh;
+    struct nlmsghdr nl_header;
     char raw[NLMSG_SPACE(sizeof(struct ifaddrmsg)) + 2 * RTA_SPACE(sizeof(struct in_addr))];
 };
 
-static void usage(const char *argv0)
+static void usage_helper(const char *argv0)
 {
     fprintf(stderr, "usage: %s list\n", argv0);
     fprintf(stderr, "       %s add <ifname> <addr>/<prefix>\n", argv0);
     fprintf(stderr, "       %s del <ifname> <addr>/<prefix>\n", argv0);
 }
 
-static int parse_cidr(const char *text, struct in_addr *ip, unsigned char *prefix)
+static int parse_cidr_helper(const char *cidr_text, struct in_addr *ip, unsigned char *prefix)
 {
     char host[INET_ADDRSTRLEN] = { 0 };
-    const char *slash;
-    unsigned long bits;
+    const char *slash_at;
+    unsigned long prefix_bits;
     char *endptr;
     size_t len;
 
-    slash = strchr(text, '/');
-    if (slash == NULL) {
+    slash_at = strchr(cidr_text, '/');
+    if (slash_at == NULL) {
         errno = EINVAL;
         return -1;
     }
 
-    len = (size_t)(slash - text);
+    len = (size_t)(slash_at - cidr_text);
     if (len == 0 || len >= sizeof(host)) {
         errno = EINVAL;
         return -1;
     }
-    memcpy(host, text, len);
+    memcpy(host, cidr_text, len);
 
     if (inet_pton(AF_INET, host, ip) != 1) {
         errno = EINVAL;
@@ -75,162 +72,152 @@ static int parse_cidr(const char *text, struct in_addr *ip, unsigned char *prefi
     }
 
     errno = 0;
-    bits = strtoul(slash + 1, &endptr, 10);
-    if (errno != 0 || endptr == slash + 1 || *endptr != '\0' || bits > 32) {
+    prefix_bits = strtoul(slash_at + 1, &endptr, 10);
+    if (errno != 0 || endptr == slash_at + 1 || *endptr != '\0' || prefix_bits > 32) {
         errno = EINVAL;
         return -1;
     }
 
-    *prefix = (unsigned char)bits;
+    *prefix = (unsigned char)prefix_bits;
     return 0;
 }
 
-static void print_addr(struct nlmsghdr *nlh)
+static void print_addr_helper(struct nlmsghdr *nl_header)
 {
-    char text[INET6_ADDRSTRLEN] = { 0 };
+    char addr_text[INET6_ADDRSTRLEN] = { 0 };
     char name[IF_NAMESIZE] = { 0 };
-    struct rtattr *tb[IFA_MAX + 1];
-    struct ifaddrmsg *ifa;
-    struct rtattr *src;
+    struct rtattr *attr_table[IFA_MAX + 1];
+    struct ifaddrmsg *addr_info;
+    struct rtattr *addr_attr;
 
-    ifa = (struct ifaddrmsg *)NLMSG_DATA(nlh);
-    nl_parse_attrs(IFA_RTA(ifa), (int)IFA_PAYLOAD(nlh), tb, IFA_MAX);
+    addr_info = (struct ifaddrmsg *)NLMSG_DATA(nl_header);
+    nl_parse_attrs_helper(IFA_RTA(addr_info), (int)IFA_PAYLOAD(nl_header), attr_table, IFA_MAX);
 
-    src = (tb[IFA_LOCAL] != NULL) ? tb[IFA_LOCAL] : tb[IFA_ADDRESS];
-    if (src == NULL) {
+    addr_attr = (attr_table[IFA_LOCAL] != NULL) ? attr_table[IFA_LOCAL] : attr_table[IFA_ADDRESS];
+    if (addr_attr == NULL) {
         return;
     }
-    if (inet_ntop(ifa->ifa_family, RTA_DATA(src), text, sizeof(text)) == NULL) {
+    if (inet_ntop(addr_info->ifa_family, RTA_DATA(addr_attr), addr_text, sizeof(addr_text)) == NULL) {
         return;
     }
-    if (if_indextoname(ifa->ifa_index, name) == NULL) {
-        snprintf(name, sizeof(name), "%u", ifa->ifa_index);
+    if (if_indextoname(addr_info->ifa_index, name) == NULL) {
+        snprintf(name, sizeof(name), "%u", addr_info->ifa_index);
     }
 
-    printf("addr_manage: %-10s %s/%u\n", name, text, ifa->ifa_prefixlen);
+    LOG_RESULT_HELPER("%-10s %s/%u", name, addr_text, addr_info->ifa_prefixlen);
 }
 
-static int list_addrs(int fd)
+static int list_addrs_helper(int fd)
 {
-    struct addr_request req = { 0 };
-    char buf[NL_BUF_SIZE];
-    struct nlmsghdr *nlh;
-    struct deadline dl;
+    struct addr_request request = { 0 };
+    char nl_recv_buf[NL_BUF_SIZE_HELPER];
+    struct nlmsghdr *nl_header;
+    ssize_t received_bytes;
     unsigned int seq;
-    ssize_t n;
     int is_done = 0;
-    int len;
+    int remaining;
 
-    seq = nl_next_seq();
-    req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(req.ifa));
-    req.nlh.nlmsg_type = RTM_GETADDR;
-    req.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-    req.nlh.nlmsg_seq = seq;
-    req.ifa.ifa_family = AF_UNSPEC;
+    seq = nl_next_seq_helper();
+    request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(request.addr_info));
+    request.nl_header.nlmsg_type = RTM_GETADDR;
+    request.nl_header.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    request.nl_header.nlmsg_seq = seq;
+    request.addr_info.ifa_family = AF_UNSPEC;
 
-    if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
-        return -1;
-    }
-
-    if (deadline_start(&dl, DUMP_TIMEOUT_MS) < 0) {
+    if (nl_send_helper(fd, &request, request.nl_header.nlmsg_len) < 0) {
         return -1;
     }
 
     while (!is_done) {
-        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
-        if (n < 0) {
+        received_bytes = nl_recv_or_shutdown_helper(fd, nl_recv_buf, sizeof(nl_recv_buf), NULL);
+        if (received_bytes < 0) {
             if (errno == EINTR) {
                 continue;
             }
             return -1;
         }
 
-        len = (int)n;
-        nlh = (struct nlmsghdr *)buf;
+        remaining = (int)received_bytes;
+        nl_header = (struct nlmsghdr *)nl_recv_buf;
 
-        while (NLMSG_OK(nlh, len)) {
-            if (nlh->nlmsg_seq != seq) {
-                nlh = NLMSG_NEXT(nlh, len);
+        while (NLMSG_OK(nl_header, remaining)) {
+            if (nl_header->nlmsg_seq != seq) {
+                nl_header = NLMSG_NEXT(nl_header, remaining);
                 continue;
             }
-            if (nlh->nlmsg_type == NLMSG_DONE) {
-                if (nl_check_done(nlh) < 0) {
+            if (nl_header->nlmsg_type == NLMSG_DONE) {
+                if (nl_check_done_helper(nl_header) < 0) {
                     return -1;
                 }
                 is_done = 1;
                 break;
             }
-            if (nl_check_error(nlh) < 0) {
+            if (nl_check_error_helper(nl_header) < 0) {
                 return -1;
             }
-            if (nlh->nlmsg_type == RTM_NEWADDR) {
-                print_addr(nlh);
+            if (nl_header->nlmsg_type == RTM_NEWADDR) {
+                print_addr_helper(nl_header);
             }
-            nlh = NLMSG_NEXT(nlh, len);
+            nl_header = NLMSG_NEXT(nl_header, remaining);
         }
     }
 
     return 0;
 }
 
-static int change_addr(int fd, unsigned short type, unsigned short extra_flags, unsigned int ifindex,
-                       const struct in_addr *ip, unsigned char prefix)
+static int change_addr_helper(int fd, unsigned short msg_type, unsigned short extra_flags, unsigned int ifindex,
+                              const struct in_addr *ip, unsigned char prefix)
 {
-    union addr_change req;
-    char buf[NL_BUF_SIZE];
-    struct ifaddrmsg *ifa;
-    struct nlmsghdr *nlh;
-    struct deadline dl;
+    union addr_change request;
+    char nl_recv_buf[NL_BUF_SIZE_HELPER];
+    struct ifaddrmsg *addr_info;
+    struct nlmsghdr *nl_header;
+    ssize_t received_bytes;
     unsigned int seq;
-    ssize_t n;
-    int len;
+    int remaining;
 
-    memset(&req, 0, sizeof(req));
+    memset(&request, 0, sizeof(request));
 
-    seq = nl_next_seq();
-    req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(*ifa));
-    req.nlh.nlmsg_type = type;
-    req.nlh.nlmsg_flags = (unsigned short)(NLM_F_REQUEST | NLM_F_ACK | extra_flags);
-    req.nlh.nlmsg_seq = seq;
+    seq = nl_next_seq_helper();
+    request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(*addr_info));
+    request.nl_header.nlmsg_type = msg_type;
+    request.nl_header.nlmsg_flags = (unsigned short)(NLM_F_REQUEST | NLM_F_ACK | extra_flags);
+    request.nl_header.nlmsg_seq = seq;
 
-    ifa = (struct ifaddrmsg *)NLMSG_DATA(&req.nlh);
-    ifa->ifa_family = AF_INET;
-    ifa->ifa_prefixlen = prefix;
-    ifa->ifa_index = ifindex;
-    ifa->ifa_scope = RT_SCOPE_UNIVERSE;
+    addr_info = (struct ifaddrmsg *)NLMSG_DATA(&request.nl_header);
+    addr_info->ifa_family = AF_INET;
+    addr_info->ifa_prefixlen = prefix;
+    addr_info->ifa_index = ifindex;
+    addr_info->ifa_scope = RT_SCOPE_UNIVERSE;
 
-    if (nl_add_attr(&req.nlh, sizeof(req), IFA_LOCAL, ip, sizeof(*ip)) < 0) {
+    if (nl_add_attr_helper(&request.nl_header, sizeof(request), IFA_LOCAL, ip, sizeof(*ip)) < 0) {
         return -1;
     }
-    if (nl_add_attr(&req.nlh, sizeof(req), IFA_ADDRESS, ip, sizeof(*ip)) < 0) {
-        return -1;
-    }
-
-    if (nl_send(fd, &req, req.nlh.nlmsg_len) < 0) {
+    if (nl_add_attr_helper(&request.nl_header, sizeof(request), IFA_ADDRESS, ip, sizeof(*ip)) < 0) {
         return -1;
     }
 
-    if (deadline_start(&dl, ACK_TIMEOUT_MS) < 0) {
+    if (nl_send_helper(fd, &request, request.nl_header.nlmsg_len) < 0) {
         return -1;
     }
 
     while (1) {
-        n = nl_recv_until(fd, buf, sizeof(buf), &dl, NULL);
-        if (n < 0) {
+        received_bytes = nl_recv_or_shutdown_helper(fd, nl_recv_buf, sizeof(nl_recv_buf), NULL);
+        if (received_bytes < 0) {
             if (errno == EINTR) {
                 continue;
             }
             return -1;
         }
 
-        len = (int)n;
-        nlh = (struct nlmsghdr *)buf;
+        remaining = (int)received_bytes;
+        nl_header = (struct nlmsghdr *)nl_recv_buf;
 
-        while (NLMSG_OK(nlh, len)) {
-            if (nlh->nlmsg_seq == seq && nlh->nlmsg_type == NLMSG_ERROR) {
-                return nl_check_error(nlh);
+        while (NLMSG_OK(nl_header, remaining)) {
+            if (nl_header->nlmsg_seq == seq && nl_header->nlmsg_type == NLMSG_ERROR) {
+                return nl_check_error_helper(nl_header);
             }
-            nlh = NLMSG_NEXT(nlh, len);
+            nl_header = NLMSG_NEXT(nl_header, remaining);
         }
     }
 }
@@ -238,67 +225,67 @@ static int change_addr(int fd, unsigned short type, unsigned short extra_flags, 
 int main(int argc, char **argv)
 {
     unsigned short extra_flags = 0;
-    unsigned short type = 0;
+    unsigned short msg_type = 0;
     unsigned char prefix = 0;
     unsigned int ifindex = 0;
     struct in_addr ip = { 0 };
     int is_listing = 0;
-    int rc;
+    int exit_status;
     int fd;
 
     if (argc < 2) {
-        usage(argv[0]);
+        usage_helper(argv[0]);
         return 1;
     }
 
     if (strcmp(argv[1], "list") == 0) {
         is_listing = 1;
     } else if (strcmp(argv[1], "add") == 0) {
-        type = RTM_NEWADDR;
+        msg_type = RTM_NEWADDR;
         extra_flags = NLM_F_CREATE | NLM_F_EXCL;
     } else if (strcmp(argv[1], "del") == 0) {
-        type = RTM_DELADDR;
+        msg_type = RTM_DELADDR;
     } else {
-        usage(argv[0]);
+        usage_helper(argv[0]);
         return 1;
     }
 
     if (!is_listing) {
         if (argc < 4) {
-            usage(argv[0]);
+            usage_helper(argv[0]);
             return 1;
         }
         ifindex = if_nametoindex(argv[2]);
         if (ifindex == 0) {
-            LOG_ERRNO("if_nametoindex()");
+            LOG_ERRNO_HELPER("if_nametoindex()");
             return 1;
         }
-        if (parse_cidr(argv[3], &ip, &prefix) < 0) {
-            LOG_MSG("bad address '%s', expected <addr>/<prefix>", argv[3]);
+        if (parse_cidr_helper(argv[3], &ip, &prefix) < 0) {
+            LOG_MSG_HELPER("bad address '%s', expected <addr>/<prefix>", argv[3]);
             return 1;
         }
     }
 
-    fd = nl_open(NETLINK_ROUTE);
+    fd = nl_open_helper(NETLINK_ROUTE);
     if (fd < 0) {
-        LOG_ERRNO("nl_open()");
+        LOG_ERRNO_HELPER("nl_open_helper()");
         return 1;
     }
 
     if (is_listing) {
-        rc = list_addrs(fd);
-        if (rc < 0) {
-            LOG_ERRNO("RTM_GETADDR");
+        exit_status = list_addrs_helper(fd);
+        if (exit_status < 0) {
+            LOG_ERRNO_HELPER("RTM_GETADDR");
         }
     } else {
-        rc = change_addr(fd, type, extra_flags, ifindex, &ip, prefix);
-        if (rc < 0) {
-            LOG_ERRNO((type == RTM_NEWADDR) ? "RTM_NEWADDR" : "RTM_DELADDR");
+        exit_status = change_addr_helper(fd, msg_type, extra_flags, ifindex, &ip, prefix);
+        if (exit_status < 0) {
+            LOG_ERRNO_HELPER((msg_type == RTM_NEWADDR) ? "RTM_NEWADDR" : "RTM_DELADDR");
         } else {
-            printf("addr_manage: %s %s on %s\n", (type == RTM_NEWADDR) ? "added" : "removed", argv[3], argv[2]);
+            LOG_RESULT_HELPER("%s %s on %s", (msg_type == RTM_NEWADDR) ? "added" : "removed", argv[3], argv[2]);
         }
     }
 
     close(fd);
-    return (rc < 0) ? 1 : 0;
+    return (exit_status < 0) ? 1 : 0;
 }

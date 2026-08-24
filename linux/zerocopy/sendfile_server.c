@@ -12,124 +12,111 @@
 
 #include <netinet/in.h>
 
-#include "common/deadline.h"
 #include "common/log.h"
 #include "common/net_util.h"
 
-#define PORT 5001
-#define BACKLOG 8
-#define IDLE_TIMEOUT_MS 5000
+#define PORT_HELPER 5001
+#define BACKLOG_HELPER 8
 
 int main(int argc, char **argv)
 {
-    char peer[PEER_TEXT_MAX] = { 0 };
-    struct sockaddr_in addr = { 0 };
-    struct deadline accept_dl;
-    struct deadline io_dl;
-    sigset_t saved_mask;
-    struct stat st;
+    char log_buf[ADDR_TEXT_MAX_HELPER] = { 0 };
+    struct sockaddr_in peer_addr = { 0 };
+    sigset_t wait_signal_mask;
+    struct stat file_info;
     off_t offset = 0;
-    ssize_t n;
-    int file_fd;
-    int listen_fd;
-    int client_fd;
+    ssize_t sent_bytes;
+    int exit_status = 1;
+    int file_fd = -1;
+    int server_fd = -1;
+    int client_fd = -1;
 
     if (argc < 2) {
         fprintf(stderr, "usage: %s <file>\n", argv[0]);
         return 1;
     }
 
-    if (install_stop_handlers(&saved_mask) < 0) {
-        LOG_ERRNO("install_stop_handlers()");
+    if (catch_shutdown_signals_helper(&wait_signal_mask) < 0) {
+        LOG_ERRNO_HELPER("catch_shutdown_signals_helper()");
         return 1;
     }
-    if (ignore_sigpipe() < 0) {
-        LOG_ERRNO("sigaction(SIGPIPE)");
+    if (ignore_sigpipe_helper() < 0) {
+        LOG_ERRNO_HELPER("sigaction(SIGPIPE)");
         return 1;
     }
 
     file_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
     if (file_fd < 0) {
-        LOG_ERRNO("open()");
+        LOG_ERRNO_HELPER("open()");
         return 1;
     }
 
-    if (fstat(file_fd, &st) < 0) {
-        LOG_ERRNO("fstat()");
-        close(file_fd);
-        return 1;
+    if (fstat(file_fd, &file_info) < 0) {
+        LOG_ERRNO_HELPER("fstat()");
+        goto cleanup;
     }
 
-    listen_fd = tcp_listen(PORT, BACKLOG, 0, 0, NULL, 0);
-    if (listen_fd < 0) {
-        LOG_ERRNO("tcp_listen()");
-        close(file_fd);
-        return 1;
+    server_fd = tcp_listen_helper(PORT_HELPER, BACKLOG_HELPER);
+    if (server_fd < 0) {
+        LOG_ERRNO_HELPER("tcp_listen_helper()");
+        goto cleanup;
     }
 
-    LOG_MSG("serving %s (%lld bytes) on port %d", argv[1], (long long)st.st_size, PORT);
+    LOG_MSG_HELPER("serving %s (%lld bytes) on port %d", argv[1], (long long)file_info.st_size, PORT_HELPER);
 
-    if (deadline_start(&accept_dl, DEADLINE_FOREVER) < 0) {
-        LOG_ERRNO("clock_gettime()");
-        close(listen_fd);
-        close(file_fd);
-        return 1;
-    }
-
-    client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
+    client_fd = tcp_accept_helper(server_fd, &peer_addr, &wait_signal_mask);
     if (client_fd < 0) {
-        if (errno == ECANCELED) {
-            LOG_MSG("stopped by signal %d", stop_signal());
-            close(listen_fd);
-            close(file_fd);
-            return 0;
+        if (should_shut_down_helper()) {
+            LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
+            exit_status = 0;
+        } else {
+            LOG_ERRNO_HELPER("tcp_accept_helper()");
         }
-        LOG_ERRNO("tcp_accept()");
-        close(listen_fd);
-        close(file_fd);
-        return 1;
+        goto cleanup;
     }
-    if (format_addr(&addr, peer, sizeof(peer)) < 0) {
-        LOG_ERRNO("format_addr()");
-        close(client_fd);
-        close(listen_fd);
-        close(file_fd);
-        return 1;
+    if (format_addr_helper(&peer_addr, log_buf, sizeof(log_buf)) < 0) {
+        LOG_ERRNO_HELPER("format_addr_helper()");
+        goto cleanup;
     }
 
-    LOG_MSG("accepted %s", peer);
+    LOG_MSG_HELPER("accepted %s", log_buf);
 
-    while (offset < st.st_size) {
-        if (deadline_start(&io_dl, IDLE_TIMEOUT_MS) < 0) {
-            LOG_ERRNO("clock_gettime()");
-            break;
-        }
-        if (wait_ready(client_fd, POLLOUT, &io_dl, &saved_mask) < 0) {
-            if (errno == ECANCELED) {
-                LOG_MSG("stopped by signal %d", stop_signal());
-                break;
+    while (offset < file_info.st_size) {
+        if (wait_ready_or_shutdown_helper(client_fd, POLLOUT, &wait_signal_mask) < 0) {
+            if (should_shut_down_helper()) {
+                LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
+            } else if (errno == ETIMEDOUT) {
+                LOG_MSG_HELPER("%s stopped answering, TCP gave up on the connection", log_buf);
+            } else {
+                LOG_ERRNO_HELPER("wait_ready_or_shutdown_helper()");
             }
-            LOG_ERRNO("wait_ready()");
             break;
         }
 
-        n = sendfile(client_fd, file_fd, &offset, (size_t)(st.st_size - offset));
-        if (n < 0) {
+        sent_bytes = sendfile(client_fd, file_fd, &offset, (size_t)(file_info.st_size - offset));
+        if (sent_bytes < 0) {
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
-            LOG_ERRNO("sendfile()");
+            LOG_ERRNO_HELPER("sendfile()");
             break;
-        }
-        if (n == 0) {
+        } else if (sent_bytes == 0) {
             break;
         }
     }
 
-    printf("sendfile_server: sent %lld bytes to %s\n", (long long)offset, peer);
+    LOG_RESULT_HELPER("sent %lld bytes to %s", (long long)offset, log_buf);
+    exit_status = 0;
 
-    close(client_fd);
-    close(listen_fd);
-    close(file_fd);
-    return 0;
+cleanup:
+    if (client_fd >= 0) {
+        close(client_fd);
+    }
+    if (server_fd >= 0) {
+        close(server_fd);
+    }
+    if (file_fd >= 0) {
+        close(file_fd);
+    }
+    return exit_status;
 }

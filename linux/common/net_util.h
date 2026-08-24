@@ -1,5 +1,5 @@
-#ifndef NET_UTIL_H
-#define NET_UTIL_H
+#ifndef NET_UTIL_H_HELPER
+#define NET_UTIL_H_HELPER
 
 #include <signal.h>
 #include <stddef.h>
@@ -9,34 +9,28 @@
 
 #include <netinet/in.h>
 
-#include "common/deadline.h"
+#define ADDR_TEXT_MAX_HELPER 32
 
-#define SIGNAL_INTERRUPTS 0
-#define SIGNAL_RESTARTS SA_RESTART
+int tcp_listen_helper(unsigned short port, int backlog);
+int tcp_connect_helper(const char *host, unsigned short port);
+int tcp_accept_helper(int server_fd, struct sockaddr_in *peer_addr, const sigset_t *wait_signal_mask);
 
-#define PEER_TEXT_MAX 32
+int udp_bind_helper(unsigned short port);
+int udp_connect_helper(const char *host, unsigned short port);
 
-int tcp_listen(unsigned short port, int backlog, int level, int optname, const void *optval, socklen_t optlen);
-int tcp_connect(const char *host, unsigned short port, const struct deadline *dl);
-int tcp_accept(int listen_fd, struct sockaddr_in *peer, const struct deadline *dl, const sigset_t *mask);
+int wait_ready_or_shutdown_helper(int fd, short events, const sigset_t *wait_signal_mask);
+ssize_t recv_or_shutdown_helper(int fd, void *recv_buf, size_t len, const sigset_t *wait_signal_mask);
+ssize_t recvfrom_or_shutdown_helper(int fd, void *recv_buf, size_t len, struct sockaddr_in *peer_addr,
+                                    const sigset_t *wait_signal_mask);
+int send_all_or_shutdown_helper(int fd, const void *send_buf, size_t len, const sigset_t *wait_signal_mask);
 
-int udp_bind(unsigned short port, int level, int optname, const void *optval, socklen_t optlen);
-int udp_connect(const char *host, unsigned short port);
+int format_addr_helper(const struct sockaddr_in *addr, char *out, size_t len);
+int format_peer_helper(int fd, char *out, size_t len);
 
-int wait_ready(int fd, short events, const struct deadline *dl, const sigset_t *mask);
-ssize_t recv_until(int fd, void *buf, size_t len, const struct deadline *dl, const sigset_t *mask);
-ssize_t recvfrom_until(int fd, void *buf, size_t len, struct sockaddr_in *peer, const struct deadline *dl, const sigset_t *mask);
-int send_all_until(int fd, const void *buf, size_t len, const struct deadline *dl, const sigset_t *mask);
-int set_nonblocking(int fd, int enable);
-
-int format_addr(const struct sockaddr_in *addr, char *out, size_t len);
-int format_peer(int fd, char *out, size_t len);
-
-int ignore_sigpipe(void);
-int install_signal_handler(int signo, void (*handler)(int), int flags);
-int install_stop_handlers(sigset_t *saved);
-int block_signals(const int *signos, size_t count, sigset_t *saved);
-int stop_requested(void);
-int stop_signal(void);
+int ignore_sigpipe_helper(void);
+int register_signal_handler_helper(int signal_number, void (*handler)(int), int flags);
+int catch_shutdown_signals_helper(sigset_t *wait_signal_mask);
+int should_shut_down_helper(void);
+int which_shutdown_signal_helper(void);
 
 #endif

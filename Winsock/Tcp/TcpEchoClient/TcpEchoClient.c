@@ -2,59 +2,74 @@
 
 #include <string.h>
 
-#define PORT 5000
-#define BUFFER_SIZE 1024
+#define PORT_HELPER 5000
+#define BUFFER_SIZE_HELPER 1024
 
 int main(int argc, char** argv)
 {
     const char* host = (argc > 1) ? argv[1] : "127.0.0.1";
     const char* message = (argc > 2) ? argv[2] : "hello, winsock";
+    char logBuf[ADDR_TEXT_MAX_HELPER];
+    char recvBuf[BUFFER_SIZE_HELPER];
+    SOCKET sock;
+    int receivedTotal = 0;
+    int receivedBytes;
+    int messageLength;
+    int chunkSize;
+    int roomLeft;
 
-    if (NetStartup() != 0)
+    if (NetStartupHelper() != 0)
     {
         return 1;
     }
 
-    SOCKET sock = ConnectTcp(host, PORT);
+    sock = ConnectTcpHelper(host, PORT_HELPER);
     if (sock == INVALID_SOCKET)
     {
-        NetCleanup();
+        NetCleanupHelper();
         return 1;
     }
 
-    int want = (int)strlen(message);
-    if (SendAll(sock, message, want) != 0)
+    if (FormatPeerHelper(sock, logBuf, sizeof(logBuf)) != 0)
     {
         closesocket(sock);
-        NetCleanup();
+        NetCleanupHelper();
         return 1;
     }
 
-    char buffer[BUFFER_SIZE];
-    int total = 0;
-    while (total < want && total < (int)sizeof(buffer) - 1)
+    LOG_MSG_HELPER("connected to %s", logBuf);
+
+    messageLength = (int)strlen(message);
+    if (SendAllHelper(sock, message, messageLength) != 0)
     {
-        int room = (int)sizeof(buffer) - 1 - total;
-        int chunk = (want - total < room) ? (want - total) : room;
-        int received = recv(sock, buffer + total, chunk, 0);
-        if (received > 0)
+        closesocket(sock);
+        NetCleanupHelper();
+        return 1;
+    }
+
+    while (receivedTotal < messageLength && receivedTotal < (int)sizeof(recvBuf) - 1)
+    {
+        roomLeft = (int)sizeof(recvBuf) - 1 - receivedTotal;
+        chunkSize = (messageLength - receivedTotal < roomLeft) ? (messageLength - receivedTotal) : roomLeft;
+        receivedBytes = recv(sock, recvBuf + receivedTotal, chunkSize, 0);
+        if (receivedBytes > 0)
         {
-            total += received;
+            receivedTotal += receivedBytes;
         }
-        else if (received == 0)
+        else if (receivedBytes == 0)
         {
             break;
         }
         else
         {
-            NET_PERROR("recv");
+            NET_PERROR_HELPER("recv");
             break;
         }
     }
-    buffer[total] = '\0';
-    LOG_MSG("received '%s'", buffer);
+    recvBuf[receivedTotal] = '\0';
+    LOG_RESULT_HELPER("received '%s' (%d bytes) from %s", recvBuf, receivedTotal, logBuf);
 
     closesocket(sock);
-    NetCleanup();
+    NetCleanupHelper();
     return 0;
 }

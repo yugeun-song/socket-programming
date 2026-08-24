@@ -39,7 +39,7 @@ compile_commands.json
 *.swo
 
 # ==============================================================================
-# ctags / cscope symbol databases (generated; regenerate with `make -C linux symbols`)
+# ctags / cscope symbol databases (generated and kept current by any `make -C linux`)
 # ==============================================================================
 tags
 TAGS

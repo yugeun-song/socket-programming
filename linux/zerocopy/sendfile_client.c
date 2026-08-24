@@ -1,66 +1,62 @@
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 
 #include <sys/socket.h>
 
-#include "common/deadline.h"
 #include "common/log.h"
 #include "common/net_util.h"
 
-#define PORT 5001
-#define BUF_SIZE 65536
-#define IDLE_TIMEOUT_MS 5000
+#define PORT_HELPER 5001
+#define BUF_SIZE_HELPER 65536
 
 int main(int argc, char **argv)
 {
     const char *host = (argc > 1) ? argv[1] : "127.0.0.1";
-    char peer[PEER_TEXT_MAX] = { 0 };
-    unsigned long long total = 0;
-    struct deadline dl;
-    char buf[BUF_SIZE];
-    ssize_t n;
+    char log_buf[ADDR_TEXT_MAX_HELPER] = { 0 };
+    unsigned long long received_total = 0;
+    char recv_buf[BUF_SIZE_HELPER];
+    ssize_t received_bytes;
     int fd;
 
-    if (ignore_sigpipe() < 0) {
-        LOG_ERRNO("sigaction(SIGPIPE)");
+    if (ignore_sigpipe_helper() < 0) {
+        LOG_ERRNO_HELPER("sigaction(SIGPIPE)");
         return 1;
     }
-    if (deadline_start(&dl, IDLE_TIMEOUT_MS) < 0) {
-        LOG_ERRNO("clock_gettime()");
-        return 1;
-    }
-
-    fd = tcp_connect(host, PORT, &dl);
+    fd = tcp_connect_helper(host, PORT_HELPER);
     if (fd < 0) {
-        LOG_ERRNO("tcp_connect()");
+        if (errno == ETIMEDOUT) {
+            LOG_MSG_HELPER("no answer from %s, TCP gave up establishing the connection", host);
+        } else {
+            LOG_ERRNO_HELPER("tcp_connect_helper()");
+        }
         return 1;
     }
-    if (format_peer(fd, peer, sizeof(peer)) < 0) {
-        LOG_ERRNO("format_peer()");
+    if (format_peer_helper(fd, log_buf, sizeof(log_buf)) < 0) {
+        LOG_ERRNO_HELPER("format_peer_helper()");
         close(fd);
         return 1;
     }
 
-    LOG_MSG("connected to %s", peer);
+    LOG_MSG_HELPER("connected to %s", log_buf);
 
     while (1) {
-        if (deadline_start(&dl, IDLE_TIMEOUT_MS) < 0) {
-            LOG_ERRNO("clock_gettime()");
-            break;
-        }
+        received_bytes = recv_or_shutdown_helper(fd, recv_buf, sizeof(recv_buf), NULL);
+        if (received_bytes < 0) {
+            if (errno == ETIMEDOUT) {
+                LOG_MSG_HELPER("%s stopped answering, TCP gave up on the connection", log_buf);
+            } else {
+                LOG_ERRNO_HELPER("recv()");
+            }
 
-        n = recv_until(fd, buf, sizeof(buf), &dl, NULL);
-        if (n < 0) {
-            LOG_ERRNO("recv()");
+            break;
+        } else if (received_bytes == 0) {
             break;
         }
-        if (n == 0) {
-            break;
-        }
-        total += (unsigned long long)n;
+        received_total += (unsigned long long)received_bytes;
     }
 
-    printf("sendfile_client: received %llu bytes from %s\n", total, peer);
+    LOG_RESULT_HELPER("received %llu bytes from %s", received_total, log_buf);
 
     close(fd);
     return 0;

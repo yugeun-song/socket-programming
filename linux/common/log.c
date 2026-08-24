@@ -7,11 +7,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#define LOG_LINE_MAX 512
+#define LOG_LINE_MAX_HELPER 512
 
-void log_write(const char *func, const char *fmt, ...)
+void log_write_helper(const char *func, const char *fmt, ...)
 {
-    char body[LOG_LINE_MAX];
+    char body[LOG_LINE_MAX_HELPER];
     va_list ap;
 
     va_start(ap, fmt);
@@ -21,14 +21,27 @@ void log_write(const char *func, const char *fmt, ...)
     fprintf(stderr, "%s: %s(): %s\n", program_invocation_short_name, func, body);
 }
 
-void log_write_errno(const char *func, const char *what)
+void log_write_errno_helper(const char *func, const char *failed_call)
 {
-    char buf[LOG_LINE_MAX];
+    char error_buf[LOG_LINE_MAX_HELPER];
     int saved_errno = errno;
-    const char *text;
+    const char *error_text;
 
-    text = strerror_r(saved_errno, buf, sizeof(buf));
-    fprintf(stderr, "%s: %s(): %s: %s\n", program_invocation_short_name, func, what, text);
+    error_text = strerror_r(saved_errno, error_buf, sizeof(error_buf));
+    fprintf(stderr, "%s: %s(): %s: %s\n", program_invocation_short_name, func, failed_call, error_text);
 
     errno = saved_errno;
+}
+
+void log_write_result_helper(const char *fmt, ...)
+{
+    char body[LOG_LINE_MAX_HELPER];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(body, sizeof(body), fmt, ap);
+    va_end(ap);
+
+    fprintf(stdout, "%s: %s\n", program_invocation_short_name, body);
+    fflush(stdout);
 }

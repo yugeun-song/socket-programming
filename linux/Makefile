@@ -1,7 +1,7 @@
 CC      = cc
-CFLAGS  = -std=c11 -Wall -Wextra -pedantic -ggdb3 -Og \
+CFLAGS  = -std=c99 -Wall -Wextra -pedantic -ggdb3 -Og \
           -fno-omit-frame-pointer -fno-optimize-sibling-calls \
-          -fasynchronous-unwind-tables -I.
+          -fasynchronous-unwind-tables -MMD -MP -I.
 LDFLAGS = -pthread
 CTAGS   = ctags
 CSCOPE  = cscope
@@ -23,11 +23,15 @@ LIB_OBJS = $(patsubst %.c,$(BIN_DIR)/%.o,$(LIB_SRCS))
 EXE_SRCS = $(filter-out $(TOPIC_LIB_SRCS),$(wildcard $(addsuffix /*.c,$(SRC_DIRS))))
 EXES     = $(patsubst %.c,$(BIN_DIR)/%,$(EXE_SRCS))
 
-SYMBOL_SRCS = $(wildcard $(addsuffix /*.c,$(LIB_DIRS) $(SRC_DIRS)) \
-                         $(addsuffix /*.h,$(LIB_DIRS) $(SRC_DIRS)))
+DEPS = $(LIB_OBJS:.o=.d) $(patsubst %.c,$(BIN_DIR)/%.d,$(EXE_SRCS))
 
-.PHONY: all clean tags cscope symbols
-all: $(EXES)
+SYMBOL_DIRS = $(wildcard $(LIB_DIRS) $(SRC_DIRS))
+SYMBOL_SRCS = $(wildcard $(addsuffix /*.c,$(SYMBOL_DIRS)) \
+                         $(addsuffix /*.h,$(SYMBOL_DIRS)))
+CTAGS_CONF  = .ctags.d/linux.ctags
+
+.PHONY: all clean symbols cscope
+all: $(EXES) tags cscope.out
 
 $(BIN_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -37,16 +41,19 @@ $(BIN_DIR)/%: %.c $(LIB_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
 
-tags:
-	$(CTAGS) -f tags $(SYMBOL_SRCS)
+symbols: tags cscope.out
+cscope: cscope.out
 
-cscope.files: $(SYMBOL_SRCS)
+tags: $(SYMBOL_SRCS) $(SYMBOL_DIRS) $(CTAGS_CONF)
+	$(CTAGS) -f $@ $(SYMBOL_SRCS)
+
+cscope.files: $(SYMBOL_SRCS) $(SYMBOL_DIRS)
 	printf '%s\n' $(SYMBOL_SRCS) > $@
 
-cscope: cscope.files
-	$(CSCOPE) -bkq -i cscope.files
-
-symbols: tags cscope
+cscope.out: cscope.files
+	$(CSCOPE) -bkqu -i cscope.files
 
 clean:
 	rm -rf $(BIN_DIR) tags cscope.out cscope.in.out cscope.po.out cscope.files
+
+-include $(DEPS)

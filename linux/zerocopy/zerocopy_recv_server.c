@@ -14,156 +14,129 @@
 
 #include <linux/tcp.h>
 
-#include "common/deadline.h"
 #include "common/log.h"
 #include "common/net_util.h"
 
-#define PORT 5002
-#define BACKLOG 8
-#define MAP_SIZE (1024 * 1024)
-#define BUF_SIZE 65536
-#define IDLE_TIMEOUT_MS 5000
-
-static unsigned long long sum_bytes(const void *data, size_t len)
-{
-    const unsigned char *p = (const unsigned char *)data;
-    unsigned long long sum = 0;
-    size_t i;
-
-    for (i = 0; i < len; ++i) {
-        sum += p[i];
-    }
-    return sum;
-}
+#define PORT_HELPER 5002
+#define BACKLOG_HELPER 8
+#define MAP_SIZE_HELPER (1024 * 1024)
+#define BUF_SIZE_HELPER 65536
 
 int main(void)
 {
-    char peer[PEER_TEXT_MAX] = { 0 };
-    struct sockaddr_in addr = { 0 };
-    struct tcp_zerocopy_receive zc;
-    unsigned long long checksum = 0;
+    char log_buf[ADDR_TEXT_MAX_HELPER] = { 0 };
+    struct sockaddr_in peer_addr = { 0 };
+    struct tcp_zerocopy_receive zerocopy;
     unsigned long long mapped = 0;
     unsigned long long copied = 0;
-    struct deadline accept_dl;
-    struct deadline io_dl;
-    sigset_t saved_mask;
-    char buf[BUF_SIZE];
-    socklen_t zclen;
-    size_t want;
-    ssize_t n;
-    void *area;
-    int listen_fd;
+    sigset_t wait_signal_mask;
+    char recv_buf[BUF_SIZE_HELPER];
+    socklen_t zerocopy_len;
+    size_t copy_len;
+    ssize_t received_bytes;
+    void *mapped_area;
+    int server_fd;
     int client_fd;
 
-    if (install_stop_handlers(&saved_mask) < 0) {
-        LOG_ERRNO("install_stop_handlers()");
+    if (catch_shutdown_signals_helper(&wait_signal_mask) < 0) {
+        LOG_ERRNO_HELPER("catch_shutdown_signals_helper()");
         return 1;
     }
 
-    listen_fd = tcp_listen(PORT, BACKLOG, 0, 0, NULL, 0);
-    if (listen_fd < 0) {
-        LOG_ERRNO("tcp_listen()");
+    server_fd = tcp_listen_helper(PORT_HELPER, BACKLOG_HELPER);
+    if (server_fd < 0) {
+        LOG_ERRNO_HELPER("tcp_listen_helper()");
         return 1;
     }
 
-    LOG_MSG("listening on port %d", PORT);
+    LOG_MSG_HELPER("listening on port %d", PORT_HELPER);
 
-    if (deadline_start(&accept_dl, DEADLINE_FOREVER) < 0) {
-        LOG_ERRNO("clock_gettime()");
-        close(listen_fd);
-        return 1;
-    }
-
-    client_fd = tcp_accept(listen_fd, &addr, &accept_dl, &saved_mask);
+    client_fd = tcp_accept_helper(server_fd, &peer_addr, &wait_signal_mask);
     if (client_fd < 0) {
-        if (errno == ECANCELED) {
-            LOG_MSG("stopped by signal %d", stop_signal());
-            close(listen_fd);
+        if (should_shut_down_helper()) {
+            LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
+            close(server_fd);
             return 0;
         }
-        LOG_ERRNO("tcp_accept()");
-        close(listen_fd);
+        LOG_ERRNO_HELPER("tcp_accept_helper()");
+        close(server_fd);
         return 1;
     }
-    if (format_addr(&addr, peer, sizeof(peer)) < 0) {
-        LOG_ERRNO("format_addr()");
+    if (format_addr_helper(&peer_addr, log_buf, sizeof(log_buf)) < 0) {
+        LOG_ERRNO_HELPER("format_addr_helper()");
         close(client_fd);
-        close(listen_fd);
+        close(server_fd);
         return 1;
     }
 
-    LOG_MSG("accepted %s", peer);
+    LOG_MSG_HELPER("accepted %s", log_buf);
 
-    area = mmap(NULL, MAP_SIZE, PROT_READ, MAP_SHARED, client_fd, 0);
-    if (area == MAP_FAILED) {
-        LOG_ERRNO("mmap()");
+    mapped_area = mmap(NULL, MAP_SIZE_HELPER, PROT_READ, MAP_SHARED, client_fd, 0);
+    if (mapped_area == MAP_FAILED) {
+        LOG_ERRNO_HELPER("mmap()");
         close(client_fd);
-        close(listen_fd);
+        close(server_fd);
         return 1;
     }
 
     while (1) {
-        if (deadline_start(&io_dl, IDLE_TIMEOUT_MS) < 0) {
-            LOG_ERRNO("clock_gettime()");
-            break;
-        }
-        if (wait_ready(client_fd, POLLIN, &io_dl, &saved_mask) < 0) {
-            if (errno == ECANCELED) {
-                LOG_MSG("stopped by signal %d", stop_signal());
-                break;
+        if (wait_ready_or_shutdown_helper(client_fd, POLLIN, &wait_signal_mask) < 0) {
+            if (should_shut_down_helper()) {
+                LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
+            } else if (errno == ETIMEDOUT) {
+                LOG_MSG_HELPER("%s stopped answering, TCP gave up on the connection", log_buf);
+            } else {
+                LOG_ERRNO_HELPER("wait_ready_or_shutdown_helper()");
             }
-            LOG_ERRNO("wait_ready()");
             break;
         }
 
-        memset(&zc, 0, sizeof(zc));
-        zclen = sizeof(zc);
-        zc.address = (uint64_t)(uintptr_t)area;
-        zc.length = MAP_SIZE;
+        memset(&zerocopy, 0, sizeof(zerocopy));
+        zerocopy_len = sizeof(zerocopy);
+        zerocopy.address = (uint64_t)(uintptr_t)mapped_area;
+        zerocopy.length = MAP_SIZE_HELPER;
 
-        if (getsockopt(client_fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE, &zc, &zclen) < 0) {
+        if (getsockopt(client_fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE, &zerocopy, &zerocopy_len) < 0) {
             if (errno == EINTR) {
                 continue;
-            }
-            if (errno == EIO) {
+            } else if (errno == EIO) {
                 break;
             }
-            LOG_ERRNO("getsockopt(TCP_ZEROCOPY_RECEIVE)");
+            LOG_ERRNO_HELPER("getsockopt(TCP_ZEROCOPY_RECEIVE)");
             break;
         }
 
-        if (zc.length > 0) {
-            checksum += sum_bytes(area, zc.length);
-            mapped += zc.length;
-            madvise(area, zc.length, MADV_DONTNEED);
+        if (zerocopy.length > 0) {
+            mapped += zerocopy.length;
+            madvise(mapped_area, zerocopy.length, MADV_DONTNEED);
             continue;
         }
 
-        want = sizeof(buf);
-        if (zc.recv_skip_hint > 0 && zc.recv_skip_hint < want) {
-            want = zc.recv_skip_hint;
+        copy_len = sizeof(recv_buf);
+        if (zerocopy.recv_skip_hint > 0 && zerocopy.recv_skip_hint < copy_len) {
+            copy_len = zerocopy.recv_skip_hint;
         }
 
-        n = recv_until(client_fd, buf, want, &io_dl, &saved_mask);
-        if (n < 0) {
-            if (errno == ECANCELED) {
-                LOG_MSG("stopped by signal %d", stop_signal());
-                break;
+        received_bytes = recv_or_shutdown_helper(client_fd, recv_buf, copy_len, &wait_signal_mask);
+        if (received_bytes < 0) {
+            if (should_shut_down_helper()) {
+                LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
+            } else if (errno == ETIMEDOUT) {
+                LOG_MSG_HELPER("%s stopped answering, TCP gave up on the connection", log_buf);
+            } else {
+                LOG_ERRNO_HELPER("recv()");
             }
-            LOG_ERRNO("recv()");
+            break;
+        } else if (received_bytes == 0) {
             break;
         }
-        if (n == 0) {
-            break;
-        }
-        checksum += sum_bytes(buf, (size_t)n);
-        copied += (unsigned long long)n;
+        copied += (unsigned long long)received_bytes;
     }
 
-    printf("zerocopy_recv_server: %llu bytes mapped, %llu bytes copied, checksum %llu, from %s\n", mapped, copied, checksum, peer);
+    LOG_RESULT_HELPER("%llu bytes the kernel mapped, %llu it had to copy, from %s", mapped, copied, log_buf);
 
-    munmap(area, MAP_SIZE);
+    munmap(mapped_area, MAP_SIZE_HELPER);
     close(client_fd);
-    close(listen_fd);
+    close(server_fd);
     return 0;
 }
