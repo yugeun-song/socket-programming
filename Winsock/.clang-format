@@ -14,3 +14,4 @@ ColumnLimit: 120
 PenaltyBreakAssignment: 100
 SortIncludes: false
 Cpp11BracedListStyle: false
+SpaceInEmptyBraces: Always

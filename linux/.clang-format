@@ -25,6 +25,7 @@ PointerAlignment: Right
 ColumnLimit: 120
 PenaltyBreakAssignment: 100
 Cpp11BracedListStyle: false
+SpaceInEmptyBraces: Always
 SortIncludes: CaseSensitive
 IncludeBlocks: Regroup
 IncludeIsMainRegex: '$'
