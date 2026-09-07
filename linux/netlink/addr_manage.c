@@ -1,12 +1,12 @@
 /*
- * addr_manage writes to the kernel: RTM_NEWADDR and RTM_DELADDR add and remove an
- * IPv4 address on a live interface, which needs CAP_NET_ADMIN and takes effect
- * immediately on the running system.  Run add/del inside a throwaway VM, not on a
- * host whose networking matters:
+ * addr_manage add/del send RTM_NEWADDR and RTM_DELADDR: an IPv4 address changes on
+ * a live interface at once, and it needs CAP_NET_ADMIN.  Use a throwaway VM, which
+ * also supplies the privilege:
  *
  *     vng --run <bzImage> -- ./linux/bin/netlink/addr_manage add lo 127.9.9.9/32
  *
- * The list subcommand, and every other program under netlink/, only reads.
+ * list only reads; of the rest under netlink/, only nflog_listen writes, and only a
+ * group binding the kernel drops when the socket closes.
  */
 
 #include <errno.h>

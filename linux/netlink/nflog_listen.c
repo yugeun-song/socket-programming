@@ -1,13 +1,9 @@
 /*
- * nflog_listen receives copies of packets the firewall logged, over
- * NETLINK_NETFILTER instead of an AF_PACKET capture socket.  It is the path ulogd
- * and similar tools take: the kernel decides which packets are interesting and the
- * program only reads what the ruleset already selected.
- *
- * Binding a log group needs CAP_NET_ADMIN, and nothing arrives until a rule feeds
- * the group, which changes the host firewall.  The group binding itself is released
- * when the socket closes, so this program leaves nothing behind; the iptables rule
- * does.  Do both in a throwaway VM:
+ * nflog_listen reads packets the firewall logged, over NETLINK_NETFILTER rather than
+ * an AF_PACKET capture socket, the way ulogd does: the ruleset decides what is
+ * interesting.  Binding a group needs CAP_NET_ADMIN, and nothing arrives until a
+ * rule feeds it, which changes the host firewall.  The bind dies with the socket;
+ * the rule does not.  Do both in a throwaway VM:
  *
  *     iptables -A OUTPUT -p icmp -j NFLOG --nflog-group 5
  *     ./linux/bin/netlink/nflog_listen 5

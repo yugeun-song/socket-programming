@@ -1,7 +1,5 @@
-# Default: normalize to LF in the repo, LF in the working tree
+# LF in the repo and in the working tree, except the Winsock tree, which is CRLF
 * text=auto eol=lf
-
-# Linux tree keeps LF; Winsock tree keeps CRLF in the working tree
 linux/**    text eol=lf
 Winsock/**  text eol=crlf
 
