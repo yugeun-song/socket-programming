@@ -146,23 +146,24 @@ to end, so it serves datagrams until a signal stops it.
 ### build
 
 ```sh
-make -C linux            # binaries at linux/bin/<topic>/<name>, and a current tags and cscope.out
+make -C linux            # binaries at linux/bin/<topic>/<name>, plus tags, cscope.out and compile_commands.json
 make -C linux clean && make -C linux GPROF=1    # -pg for gprof / mcount-based uftrace
 make -C linux symbols    # the symbol index on its own
 make -C linux tags       # ctags only
 make -C linux cscope     # cscope only
-make -C linux clean      # also removes tags, cscope.* and bin/
+make -C linux compdb     # compile_commands.json only
+make -C linux clean      # also removes tags, cscope.*, compile_commands.json and bin/
 ```
 
 `GPROF=1` needs the `clean` in front of it: it changes compiler flags rather than files, and make
 decides what to rebuild from mtimes alone, so over an existing tree it reports success and recompiles
 nothing. The reverse is the same trap, a plain `make` leaving every binary carrying `-pg`.
 
-`tags` and `cscope.out` are file targets of the default build rather than a command to remember; left
-to a separate command they went ungenerated until `<C-]>` answered `E433: No tags file`. Both depend
-on every `.c` and `.h` plus the source directories, `cscope.out` reaching that set through
-`cscope.files`; the directories are listed because deleting a file also removes the prerequisite that
-would have reported the change.
+`tags`, `cscope.out` and `compile_commands.json` are file targets of the default build rather than a
+command to remember; left to a separate command they went ungenerated until `<C-]>` answered
+`E433: No tags file`. All three depend on every `.c` and `.h` plus the source directories,
+`cscope.out` reaching that set through `cscope.files`; the directories are listed because deleting a
+file also removes the prerequisite that would have reported the change.
 
 `-MMD -MP` has the compiler record what each object included, and the `-include` at the foot of the
 Makefile feeds those lists back in. Without them a header edit rebuilt nothing: changing
@@ -185,6 +186,24 @@ cd linux
 cscope -dL -1 nl_recv_or_shutdown_helper     # where is it defined
 cscope -dL -3 wait_ready_or_shutdown_helper  # who calls it
 ```
+
+`compile_commands.json` comes from the Makefile rather than from `bear`, so it tracks the flags above
+without a second tool. It has to reproduce the build exactly: `-std=c99` defines `__STRICT_ANSI__`,
+which hides `sigset_t`, and the executable rule compiles only because `$(LDFLAGS)` puts `-pthread` on
+the same invocation, whose `_REENTRANT` glibc turns into `_DEFAULT_SOURCE`. Library objects reach the
+same place through their own `#define _GNU_SOURCE`. Without `-pthread` on the executable entries
+clangd answers with 316 errors over the tree.
+
+`linux/.clangd` hands `.h` files `-pthread`. A header opened on its own has no entry, so clangd borrows
+one from a file that includes it; `net_util.h` drew `net_util.c`, which carries no `-pthread`, and
+reported six `unknown type name 'sigset_t'`. `-pthread` rather than `-D_GNU_SOURCE` because it is the
+thinnest environment any includer supplies: `_GNU_SOURCE` opens `__USE_GNU` and 19 more `__USE_*`, so a
+header could declare a GNU-only call, read clean on its own, and still break `tcp_echo_server.c`. The
+same file drops `UnusedIncludes`, because clangd reads `sigset_t` as coming from
+`bits/types/__sigset_t.h` and calls the `<signal.h>` that supplies it unused, and suppresses the five
+`unused-*` diagnostics: a handler installed through `sigaction` carries the signature the API fixes,
+`(int, siginfo_t *, void *)` under `SA_SIGINFO`, and one that only raises a flag reads none of it.
+The build still reports them.
 
 ### run
 
