@@ -32,7 +32,7 @@ CTAGS_CONF   = .ctags.d/linux.ctags
 COMPDB       = compile_commands.json
 COMPDB_FLAGS = $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all clean symbols cscope compdb
+.PHONY: all clean symbols cscope compdb format format-check
 all: $(EXES) tags cscope.out $(COMPDB)
 
 $(BIN_DIR)/%.o: %.c
@@ -68,6 +68,12 @@ $(COMPDB): $(SYMBOL_SRCS) $(SYMBOL_DIRS) Makefile
 	   for src in $(LIB_SRCS); do emit $$src $(CC) $(COMPDB_FLAGS) -c $$src -o $(BIN_DIR)/$${src%.c}.o; done; \
 	   for src in $(EXE_SRCS); do emit $$src $(CC) $(COMPDB_FLAGS) $(LDFLAGS) $$src -o $(BIN_DIR)/$${src%.c}; done; \
 	   printf '\n]\n'; } > $@
+
+format:
+	clang-format -i $(SYMBOL_SRCS)
+
+format-check:
+	clang-format --dry-run --Werror $(SYMBOL_SRCS)
 
 clean:
 	rm -rf $(BIN_DIR) tags cscope.out cscope.in.out cscope.po.out cscope.files $(COMPDB)

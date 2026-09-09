@@ -146,13 +146,15 @@ to end, so it serves datagrams until a signal stops it.
 ### build
 
 ```sh
-make -C linux            # binaries at linux/bin/<topic>/<name>, plus tags, cscope.out and compile_commands.json
+make -C linux                 # binaries at linux/bin/<topic>/<name>, plus tags, cscope.out and compile_commands.json
 make -C linux clean && make -C linux GPROF=1    # -pg for gprof / mcount-based uftrace
-make -C linux symbols    # the symbol index on its own
-make -C linux tags       # ctags only
-make -C linux cscope     # cscope only
-make -C linux compdb     # compile_commands.json only
-make -C linux clean      # also removes tags, cscope.*, compile_commands.json and bin/
+make -C linux symbols         # the symbol index on its own
+make -C linux tags            # ctags only
+make -C linux cscope          # cscope only
+make -C linux compdb          # compile_commands.json only
+make -C linux format          # clang-format -i over every source and header
+make -C linux format-check    # clang-format --dry-run --Werror; nonzero on drift
+make -C linux clean           # also removes tags, cscope.*, compile_commands.json and bin/
 ```
 
 `GPROF=1` needs the `clean` in front of it: it changes compiler flags rather than files, and make
