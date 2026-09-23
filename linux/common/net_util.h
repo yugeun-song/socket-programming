@@ -12,7 +12,7 @@
 #define ADDR_TEXT_MAX_HELPER 32
 
 int tcp_listen_helper(unsigned short port, int backlog);
-int tcp_connect_helper(const char *host, unsigned short port);
+int tcp_connect_helper(const char *host, unsigned short port, const sigset_t *wait_signal_mask);
 int tcp_accept_helper(int server_fd, struct sockaddr_in *peer_addr, const sigset_t *wait_signal_mask);
 
 int udp_bind_helper(unsigned short port);

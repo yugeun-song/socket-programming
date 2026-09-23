@@ -51,12 +51,12 @@ static int bind_inet_helper(int sock_type, unsigned short port)
     return fd;
 }
 
-static int wait_connected_helper(int fd)
+static int wait_connected_helper(int fd, const sigset_t *wait_signal_mask)
 {
     socklen_t sock_error_len = sizeof(int);
     int sock_error = 0;
 
-    if (wait_ready_or_shutdown_helper(fd, POLLOUT, NULL) < 0) {
+    if (wait_ready_or_shutdown_helper(fd, POLLOUT, wait_signal_mask) < 0) {
         return -1;
     }
     if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &sock_error, &sock_error_len) < 0) {
@@ -69,7 +69,7 @@ static int wait_connected_helper(int fd)
     return 0;
 }
 
-static int connect_inet_helper(int sock_type, const char *host, unsigned short port)
+static int connect_inet_helper(int sock_type, const char *host, unsigned short port, const sigset_t *wait_signal_mask)
 {
     struct sockaddr_in peer_addr = { 0 };
     int saved_errno;
@@ -95,7 +95,7 @@ static int connect_inet_helper(int sock_type, const char *host, unsigned short p
             errno = saved_errno;
             return -1;
         }
-        if (wait_connected_helper(fd) < 0) {
+        if (wait_connected_helper(fd, wait_signal_mask) < 0) {
             saved_errno = errno;
             close(fd);
             errno = saved_errno;
@@ -126,9 +126,9 @@ int tcp_listen_helper(unsigned short port, int backlog)
     return fd;
 }
 
-int tcp_connect_helper(const char *host, unsigned short port)
+int tcp_connect_helper(const char *host, unsigned short port, const sigset_t *wait_signal_mask)
 {
-    return connect_inet_helper(SOCK_STREAM, host, port);
+    return connect_inet_helper(SOCK_STREAM, host, port, wait_signal_mask);
 }
 
 int tcp_accept_helper(int server_fd, struct sockaddr_in *peer_addr, const sigset_t *wait_signal_mask)
@@ -167,7 +167,7 @@ int udp_bind_helper(unsigned short port)
 
 int udp_connect_helper(const char *host, unsigned short port)
 {
-    return connect_inet_helper(SOCK_DGRAM, host, port);
+    return connect_inet_helper(SOCK_DGRAM, host, port, NULL);
 }
 
 int wait_ready_or_shutdown_helper(int fd, short events, const sigset_t *wait_signal_mask)
@@ -264,11 +264,17 @@ int send_all_or_shutdown_helper(int fd, const void *send_buf, size_t len, const 
 int format_addr_helper(const struct sockaddr_in *addr, char *out, size_t len)
 {
     char host[INET_ADDRSTRLEN] = { 0 };
+    int written;
 
     if (inet_ntop(AF_INET, &addr->sin_addr, host, sizeof(host)) == NULL) {
         return -1;
     }
-    if (snprintf(out, len, "%s:%u", host, ntohs(addr->sin_port)) < 0) {
+    written = snprintf(out, len, "%s:%u", host, ntohs(addr->sin_port));
+    if (written < 0) {
+        return -1;
+    }
+    if ((size_t)written >= len) {
+        errno = ENOSPC;
         return -1;
     }
     return 0;

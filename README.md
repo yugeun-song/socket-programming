@@ -191,10 +191,12 @@ cscope -dL -3 wait_ready_or_shutdown_helper  # who calls it
 
 `compile_commands.json` comes from the Makefile rather than from `bear`, so it tracks the flags above
 without a second tool. It has to reproduce the build exactly: `-std=c99` defines `__STRICT_ANSI__`,
-which hides `sigset_t`, and the executable rule compiles only because `$(LDFLAGS)` puts `-pthread` on
-the same invocation, whose `_REENTRANT` glibc turns into `_DEFAULT_SOURCE`. Library objects reach the
-same place through their own `#define _GNU_SOURCE`. Without `-pthread` on the executable entries
-clangd answers with 316 errors over the tree.
+which hides `sigset_t`, so every executable defines `_POSIX_C_SOURCE 200809L` before its first
+include, and library objects reach the same place through their own `#define _GNU_SOURCE`. Before
+that macro the executable rule compiled only because `$(LDFLAGS)` put `-pthread` on the same
+invocation, whose `_REENTRANT` glibc's `features.h` maps to `_POSIX_C_SOURCE 199506L` (not
+`_DEFAULT_SOURCE`); without `-pthread` on the executable entries clangd answered with 316 errors
+over the tree.
 
 `linux/.clangd` hands `.h` files `-pthread`. A header opened on its own has no entry, so clangd borrows
 one from a file that includes it; `net_util.h` drew `net_util.c`, which carries no `-pthread`, and
@@ -246,11 +248,11 @@ The tcp, udp and splice servers all bind 5000, so those stanzas run one at a tim
 
 ### layout
 
-- `common/net_util.{c,h}` — BSD helpers. The five that wait take an optional signal mask:
-  `tcp_accept_helper`, `wait_ready_or_shutdown_helper`, `recv_or_shutdown_helper`,
-  `recvfrom_or_shutdown_helper`, `send_all_or_shutdown_helper`. `tcp_listen_helper`,
-  `tcp_connect_helper`, `udp_bind_helper` and `udp_connect_helper` take none, though
-  `tcp_connect_helper` still waits, on `POLLOUT` with a `NULL` mask. `format_addr_helper` and
+- `common/net_util.{c,h}` — BSD helpers. The six that wait take an optional signal mask:
+  `tcp_accept_helper`, `tcp_connect_helper` (on `POLLOUT`, for the non-blocking connect),
+  `wait_ready_or_shutdown_helper`, `recv_or_shutdown_helper`, `recvfrom_or_shutdown_helper`,
+  `send_all_or_shutdown_helper`. `tcp_listen_helper`, `udp_bind_helper` and `udp_connect_helper`
+  take none. `format_addr_helper` and
   `format_peer_helper` render a peer as `address:port`; the signal side is `ignore_sigpipe_helper`,
   `register_signal_handler_helper`, `catch_shutdown_signals_helper`, `should_shut_down_helper` and
   `which_shutdown_signal_helper`. A wait ends three ways, told apart at the call site: readiness

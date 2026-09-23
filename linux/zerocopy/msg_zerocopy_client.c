@@ -98,7 +98,7 @@ int main(int argc, char **argv)
     }
     memset(send_buf, 'z', CHUNK_SIZE_HELPER);
 
-    fd = tcp_connect_helper(host, PORT_HELPER);
+    fd = tcp_connect_helper(host, PORT_HELPER, NULL);
     if (fd < 0) {
         LOG_ERRNO_HELPER("tcp_connect_helper()");
         free(send_buf);

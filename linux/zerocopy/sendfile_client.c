@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -23,7 +25,7 @@ int main(int argc, char **argv)
         LOG_ERRNO_HELPER("sigaction(SIGPIPE)");
         return 1;
     }
-    fd = tcp_connect_helper(host, PORT_HELPER);
+    fd = tcp_connect_helper(host, PORT_HELPER, NULL);
     if (fd < 0) {
         if (errno == ETIMEDOUT) {
             LOG_MSG_HELPER("no answer from %s, TCP gave up establishing the connection", host);

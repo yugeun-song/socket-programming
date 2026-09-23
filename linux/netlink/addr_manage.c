@@ -9,6 +9,8 @@
  * group binding the kernel drops when the socket closes.
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
