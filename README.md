@@ -160,30 +160,30 @@ to end, so it serves datagrams until a signal stops it.
 ### build
 
 ```sh
-make -C linux                 # binaries at linux/bin/<topic>/<name>, plus tags, cscope.out and compile_commands.json
-make -C linux CC=clang        # the same build with clang instead of cc
-make -C linux clean && make -C linux GPROF=1    # -pg for gprof / mcount-based uftrace
-make -C linux symbols         # the symbol index on its own
-make -C linux tags            # ctags only
-make -C linux cscope          # cscope only
-make -C linux compdb          # compile_commands.json only
+make -C linux                 # debug and sanitize builds, one job per CPU unless -j is given
+make -C linux debug           # linux/bin/<arch>-linux-<cc>-debug/<topic>/<name>: -O0, full debug info, -pg
+make -C linux sanitize        # the debug build with -fsanitize=address, or the list in SANITIZE=
+make -C linux release         # -O2, hardened, LTO
+make -C linux CC=clang        # any of the above with clang instead of gcc
+make -C linux index           # compile_commands.json, tags and cscope.out (also compdb, tags, cscope)
+make -C linux clean-index     # remove the index files
+make -C linux clean           # remove bin/ and build/
+make -C linux distclean       # clean, clean-index, tool outputs and .cache/
 make -C linux format          # clang-format -i over every source and header
 make -C linux format-check    # clang-format --dry-run --Werror; nonzero on drift
-make -C linux clean           # also removes tags, cscope.*, compile_commands.json and bin/
 ```
 
-`GPROF=1` needs the `clean` in front of it: it changes compiler flags rather than files, and make
-decides what to rebuild from mtimes alone, so over an existing tree it reports success and recompiles
-nothing. The reverse is the same trap, a plain `make` leaving every binary carrying `-pg`.
+`linux/mk/c.mk` holds the rules and flag tables shared with the other repositories that build with
+Make; `linux/Makefile` keeps the program list and the flags of this tree. Every mode and compiler
+builds into its own directories under `bin/` and `build/`, and every object depends on both
+makefiles, so switching modes or editing a flag never reuses a stale object. A flag the compiler or
+the target rejects is dropped after a probe, and the build names the dropped flags once.
 
-`tags`, `cscope.out` and `compile_commands.json` are file targets of the default build rather than a
-command to remember; left to a separate command they went ungenerated until `<C-]>` answered
-`E433: No tags file`. All three depend on every `.c` and `.h` plus the source directories,
-`cscope.out` reaching that set through `cscope.files`; the directories are listed because deleting a
-file also removes the prerequisite that would have reported the change.
+`tags`, `cscope.out` and `compile_commands.json` come from `make -C linux index`, not from the
+default build, and `make -C linux clean-index` removes exactly those files.
 
-`-MMD -MP` has the compiler record what each object included, and the `-include` at the foot of the
-Makefile feeds those lists back in. Without them a header edit rebuilt nothing: changing
+`-MMD -MP` has the compiler record what each object included, and `mk/c.mk` includes those lists
+back. Without them a header edit rebuilt nothing: changing
 `ADDR_TEXT_MAX_HELPER` in `net_util.h` left every binary byte-identical while make reported success.
 
 `linux/.ctags.d/linux.ctags` holds the ctags settings, so an editor invoking ctags itself indexes the
@@ -204,14 +204,12 @@ cscope -dL -1 nl_recv_or_shutdown_helper     # where is it defined
 cscope -dL -3 wait_ready_or_shutdown_helper  # who calls it
 ```
 
-`compile_commands.json` comes from the Makefile rather than from `bear`, so it tracks the flags
-above without a second tool. It has to reproduce the build exactly: `-std=c99` defines
-`__STRICT_ANSI__`, which hides `sigset_t`, so every source file defines the narrowest feature test
-macro it needs before its first include: `_POSIX_C_SOURCE 200809L` where POSIX is enough,
-`_DEFAULT_SOURCE` or `_GNU_SOURCE` where the file calls beyond it. Before those macros the
-executable rule compiled only because `$(LDFLAGS)` put `-pthread` on the same invocation, whose
-`_REENTRANT` glibc's `features.h` maps to `_POSIX_C_SOURCE 199506L` (not `_DEFAULT_SOURCE`); without
-`-pthread` on the executable entries clangd answered with 316 errors over the tree.
+`compile_commands.json` comes from `mk/c.mk` rather than from `bear`, and it carries the debug
+flags, so it tracks the build without a second tool. It has to reproduce the build exactly:
+`-std=c99` defines `__STRICT_ANSI__`, which hides `sigset_t`, so every source file defines the
+narrowest feature test macro it needs before its first include: `_POSIX_C_SOURCE 200809L` where
+POSIX is enough, `_DEFAULT_SOURCE` or `_GNU_SOURCE` where the file calls beyond it. Objects compile
+without `-pthread`, which only reaches the link, so nothing else supplies those macros.
 
 `linux/.clangd` hands `.h` files `-pthread`. A header opened on its own has no entry, so clangd borrows
 one from a file that includes it; `net_util.h` drew `net_util.c`, which carries no `-pthread`, and
@@ -227,36 +225,38 @@ The build still reports them.
 ### run
 
 ```sh
-./linux/bin/tcp/tcp_echo_server &
-./linux/bin/tcp/tcp_echo_client 127.0.0.1 "hello, socket"
+B=linux/bin/x86_64-linux-gcc-debug     # the directory make names
+
+$B/tcp/tcp_echo_server &
+$B/tcp/tcp_echo_client 127.0.0.1 "hello, socket"
 
 # UDP, port 5000, until SIGINT or SIGTERM
-./linux/bin/udp/udp_echo_server &
-./linux/bin/udp/udp_echo_client 127.0.0.1 "hello, udp"
+$B/udp/udp_echo_server &
+$B/udp/udp_echo_client 127.0.0.1 "hello, udp"
 
 # sendfile(2), port 5001
-./linux/bin/zerocopy/sendfile_server linux/Makefile &
-./linux/bin/zerocopy/sendfile_client 127.0.0.1
+$B/zerocopy/sendfile_server linux/Makefile &
+$B/zerocopy/sendfile_client 127.0.0.1
 
 # splice(2), port 5000, drop-in for tcp/tcp_echo_server
-./linux/bin/zerocopy/splice_echo_server &
-./linux/bin/tcp/tcp_echo_client 127.0.0.1 "hello, splice"
+$B/zerocopy/splice_echo_server &
+$B/tcp/tcp_echo_client 127.0.0.1 "hello, splice"
 
 # MSG_ZEROCOPY into TCP_ZEROCOPY_RECEIVE, port 5002
-./linux/bin/zerocopy/zerocopy_recv_server &
-./linux/bin/zerocopy/msg_zerocopy_client 127.0.0.1
+$B/zerocopy/zerocopy_recv_server &
+$B/zerocopy/msg_zerocopy_client 127.0.0.1
 
 # netlink, read-only, unprivileged
-./linux/bin/netlink/link_dump
-./linux/bin/netlink/addr_manage list
-./linux/bin/netlink/sock_diag_dump
-./linux/bin/netlink/genl_family_list
-./linux/bin/netlink/route_monitor        # until SIGINT or SIGTERM
+$B/netlink/link_dump
+$B/netlink/addr_manage list
+$B/netlink/sock_diag_dump
+$B/netlink/genl_family_list
+$B/netlink/route_monitor        # until SIGINT or SIGTERM
 
 # netlink, changes the running system, needs CAP_NET_ADMIN -- use a throwaway VM
-./linux/bin/netlink/addr_manage add lo 127.9.9.9/32
-./linux/bin/netlink/addr_manage del lo 127.9.9.9/32
-./linux/bin/netlink/nflog_listen 5       # needs an NFLOG rule feeding group 5
+$B/netlink/addr_manage add lo 127.9.9.9/32
+$B/netlink/addr_manage del lo 127.9.9.9/32
+$B/netlink/nflog_listen 5       # needs an NFLOG rule feeding group 5
 ```
 
 The tcp, udp and splice servers all bind 5000, so those stanzas run one at a time.
@@ -398,10 +398,11 @@ families.
 
 ### profiling & tracing
 
-The always-on flags (`-ggdb3`, frame pointers, no sibling-call optimization, async unwind tables)
-keep the binaries debuggable and traceable under perf, gdb, valgrind, uftrace and `strace -k` with no
-separate build (`uftrace record -P. ./linux/bin/tcp/tcp_echo_client`). `make -C linux GPROF=1` adds
-`-pg` to both `CFLAGS` and `LDFLAGS` for gprof and mcount-based uftrace.
+Debug and sanitize builds keep `-O0 -ggdb3`, frame pointers, no sibling-call optimization and async
+unwind tables, link without PIE and with `-rdynamic`, and carry `-pg`. perf, gdb, valgrind, gprof,
+uftrace and `strace -k` work on them with no separate build
+(`uftrace record $B/tcp/tcp_echo_client 127.0.0.1 hi`), and every such program writes `gmon.out`
+into the directory it runs from.
 
 ## Winsock/
 

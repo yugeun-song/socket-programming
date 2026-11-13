@@ -6,5 +6,6 @@
 --tag-relative=yes
 --sort=yes
 --exclude=bin
+--exclude=build
 --exclude=tags
 --exclude=cscope.*

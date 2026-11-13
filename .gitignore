@@ -1,6 +1,7 @@
 # Build output
 bin/
 **/bin/
+/linux/build/
 *.o
 *.obj
 *.a
@@ -32,7 +33,7 @@ compile_commands.json
 *.swp
 *.swo
 
-# Symbol databases; the default `make -C linux` builds them, `clean` removes them
+# Symbol databases; `make -C linux index` builds them, `clean-index` removes them
 tags
 TAGS
 cscope.out
