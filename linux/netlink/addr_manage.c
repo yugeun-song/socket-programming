@@ -137,7 +137,7 @@ static int list_addrs_helper(int fd)
             return -1;
         }
 
-        int remaining = (int)received_bytes;
+        ssize_t remaining = received_bytes;
 
         for (const struct nlmsghdr *nl_header = (const struct nlmsghdr *)nl_recv_buf;
              NLMSG_OK(nl_header, remaining); nl_header = NLMSG_NEXT(nl_header, remaining)) {
@@ -207,7 +207,7 @@ static int change_addr_helper(int fd, unsigned short msg_type, unsigned short ex
             return -1;
         }
 
-        int remaining = (int)received_bytes;
+        ssize_t remaining = received_bytes;
 
         for (const struct nlmsghdr *nl_header = (const struct nlmsghdr *)nl_recv_buf;
              NLMSG_OK(nl_header, remaining); nl_header = NLMSG_NEXT(nl_header, remaining)) {

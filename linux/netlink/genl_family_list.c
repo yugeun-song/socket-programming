@@ -103,7 +103,7 @@ int main(void)
             goto out_close_fd;
         }
 
-        int remaining = (int)received_bytes;
+        ssize_t remaining = received_bytes;
 
         for (const struct nlmsghdr *nl_header = (const struct nlmsghdr *)nl_recv_buf;
              NLMSG_OK(nl_header, remaining); nl_header = NLMSG_NEXT(nl_header, remaining)) {

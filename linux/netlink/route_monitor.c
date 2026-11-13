@@ -188,7 +188,7 @@ int main(void)
             goto out_close_fd;
         }
 
-        int len = (int)received_bytes;
+        ssize_t len = received_bytes;
 
         for (const struct nlmsghdr *nl_header = (const struct nlmsghdr *)nl_recv_buf;
              NLMSG_OK(nl_header, len); nl_header = NLMSG_NEXT(nl_header, len)) {
