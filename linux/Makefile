@@ -1,5 +1,5 @@
 CC      = cc
-CFLAGS  = -std=c99 -Wall -Wextra -pedantic -ggdb3 -Og \
+CFLAGS  = -std=c99 -Wall -Wextra -pedantic -Wshadow -ggdb3 -Og \
           -fno-omit-frame-pointer -fno-optimize-sibling-calls \
           -fasynchronous-unwind-tables -MMD -MP -I.
 LDFLAGS = -pthread
