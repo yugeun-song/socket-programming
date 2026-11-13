@@ -224,10 +224,8 @@ the macros that file defines. The borrowed `-pthread` still exposes `sigset_t`. 
 thinner than any includer's, whereas `-D_GNU_SOURCE` opens `__USE_GNU` and 19 more `__USE_*`, so a
 header could declare a GNU-only call, read clean on its own, and still break `tcp_echo_server.c`.
 `linux/.clangd` drops `UnusedIncludes`, because clangd reads `sigset_t` as coming from
-`bits/types/__sigset_t.h` and calls the `<signal.h>` that supplies it unused, and suppresses the five
-`unused-*` diagnostics: a handler installed through `sigaction` carries the signature the API fixes,
-`(int, siginfo_t *, void *)` under `SA_SIGINFO`, and one that only raises a flag reads none of it.
-The build still reports them.
+`bits/types/__sigset_t.h` and calls the `<signal.h>` that supplies it unused. Every other diagnostic
+follows the build, which reports no unused warnings.
 
 ### run
 

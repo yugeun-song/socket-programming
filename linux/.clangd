@@ -1,8 +1,2 @@
 Diagnostics:
     UnusedIncludes: None
-    Suppress:
-        - unused-parameter
-        - unused-variable
-        - unused-but-set-variable
-        - unused-label
-        - unused-function
