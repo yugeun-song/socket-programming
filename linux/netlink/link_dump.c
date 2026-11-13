@@ -1,10 +1,10 @@
 #define _DEFAULT_SOURCE
 
 #include <errno.h>
+#include <linux/if_ether.h>
 #include <linux/if_link.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
-#include <net/ethernet.h>
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <stdio.h>

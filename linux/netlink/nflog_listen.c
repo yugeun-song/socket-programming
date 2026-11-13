@@ -13,10 +13,10 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <linux/if_ether.h>
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter/nfnetlink_log.h>
 #include <linux/netlink.h>
-#include <net/ethernet.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <signal.h>

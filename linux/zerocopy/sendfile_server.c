@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/sendfile.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
