@@ -173,7 +173,8 @@ make -C linux distclean       # clean, clean-index, tool outputs and .cache/
 make -C linux format          # clang-format -i over every source and header
 make -C linux format-check    # clang-format --dry-run --Werror; nonzero on drift
 make -C linux unused          # unused diagnostics (clang) and unused functions (cppcheck)
-make -C linux help            # the goals, the variables and the programs
+make -C linux list            # every program
+make -C linux help            # the goals, the variables and the first ten programs
 ```
 
 `linux/build.mk` holds the rules and flag tables shared with the other repositories that build with
@@ -184,7 +185,9 @@ the target rejects is dropped after a probe. The probe prints the flags of every
 goal ends with a `=>` line that names what it produced and where.
 
 `tags`, `cscope.out` and `compile_commands.json` come from `make -C linux index`, not from the
-default build, and `make -C linux clean-index` removes exactly those files.
+default build, and `make -C linux clean-index` removes exactly those files. Once written,
+`compile_commands.json` is rewritten by every build whose flags changed, so an editor never reads
+stale flags.
 
 `-MMD -MP` has the compiler record what each object included, and `build.mk` includes those lists
 back. Without them a header edit rebuilt nothing: changing
