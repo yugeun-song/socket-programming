@@ -9,13 +9,17 @@ indent_style = space
 indent_size = 4
 max_line_length = 120
 
-# Windows conventions; the final-newline rule above still applies
-[Winsock/**]
-end_of_line = crlf
-insert_final_newline = false
+[*.{c,h}]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 100
 
 # Visual Studio project metadata, wherever it sits
-[*.{sln,vcxproj,filters,props,targets}]
+[*.{sln,slnx,vcxproj,filters,props,targets}]
 end_of_line = crlf
 
 # Recipes are hard tabs

@@ -4,6 +4,13 @@ Socket programming study with the Windows and Linux ecosystems kept fully separa
 cross-platform abstraction layer: each tree is native, and naming, brace style, line endings and
 build system all differ by platform.
 
+## Coding style
+
+The Linux code follows the
+[c-programming coding style](https://github.com/yugeun-song/c-programming/blob/main/docs/coding-style.md).
+The Winsock code is Windows-only and keeps the Windows style, through its own `.clang-format` and
+`.editorconfig`.
+
 ## Layout
 
 ```
@@ -17,38 +24,44 @@ socket-programming/
 
 Conventions are enforced per tree because the two toolchains differ:
 
-- `.editorconfig` lives at the **root** and branches by path section: `[Winsock/**]` switches to
-  CRLF, `[**/Makefile]` to hard tabs, and `insert_final_newline = false` holds everywhere, Winsock
-  included. `root = true` stops the upward walk, so one file drives both trees.
+- `.editorconfig` is **per tree** as well. The root file covers `linux/` and the repository files:
+  `[*.{c,h}]` adds the final newline and the 100-column limit of the coding style, `[**/Makefile]`
+  switches to hard tabs, and `insert_final_newline = false` holds for everything else.
+  `Winsock/.editorconfig` sets `root = true`, so its CRLF, missing final newline and 120 columns
+  apply there without inheriting anything from the root.
 - `.clang-format` is **per tree**, because clang-format takes the nearest config walking upward and
   cannot branch by path within one file: `linux/` is LLVM / K&R braces / `int *p`, `Winsock/` is
   Microsoft / Allman / `int* p`.
 - `IncludeBlocks: Regroup` orders the `linux/` includes rather than any hand discipline: own header,
-  flat `<...>`, `<sys/...>`, `<arpa|net|netinet/...>`, `<linux/...>`, project `"..."`, alphabetical
-  within a group and one blank line between. Own header first proves it compiles alone, and the
-  groups widen from portable to platform-specific; `_GNU_SOURCE` and its kind stay above the block
-  because they decide what the headers below expose.
+  every `<...>` header in one alphabetical block, project `"..."`, one blank line between. Own
+  header first proves it compiles alone. `<linux/errqueue.h>` is pinned to the end of its block,
+  because it uses `struct timespec` without declaring it. `_GNU_SOURCE` and its kind stay above the
+  block because they decide what the headers below expose.
 - `Winsock/.clang-format` keeps `SortIncludes: false` as a guard, not a fix. Nothing there needs it
   today — `<winsock2.h>` and `<ws2tcpip.h>` already sort in order and `WIN32_LEAN_AND_MEAN` handles
   the classic clash — but `<windows.h>` sorts above `<winsock2.h>`.
-- Braces hold their contents at arm's length: `Cpp11BracedListStyle: false` gives `{ 0 }` over `{0}`,
-  `SpaceInEmptyBraces: Always` gives `{ }`, and a list too long for the line wraps inside the braces
-  with the spaces intact. `SpaceInEmptyBraces` needs clang-format 21; the older `SpaceInEmptyBlock`
-  is still accepted but does nothing.
-- 120 columns, stated twice because two tools have to agree: `ColumnLimit` per `.clang-format` and
-  `max_line_length` in `.editorconfig`. `ColumnLimit` alone is weighed against
-  `PenaltyExcessCharacter`, once set to 1 here, so overflow beat breaking and nine lines across seven
-  files ran past 120 while clang-format still reported the tree clean. That key is gone now.
-- `PenaltyBreakAssignment: 100` wraps a long call inside its argument list rather than after the `=`;
-  the default of 2 strands the callee on its own line and hides which variable is written.
+- Braces hold their contents at arm's length: `Cpp11BracedListStyle: false` gives `{ 0 }` over `{0}`
+  in both trees. `Winsock/` adds `SpaceInEmptyBraces: Always` for `{ }`, which needs clang-format
+  21; the older `SpaceInEmptyBlock` is still accepted but does nothing.
+- Line length differs by tree. `linux/` breaks lines by hand within 100 columns, as the coding style
+  asks: `ColumnLimit: 0` keeps every hand-made break, and `max_line_length` tells the editor.
+  `Winsock/` keeps 120 columns, stated twice because two tools have to agree: `ColumnLimit` in its
+  `.clang-format` and `max_line_length` in its `.editorconfig`. `ColumnLimit` alone is weighed
+  against `PenaltyExcessCharacter`, once set to 1 here, so overflow beat breaking and nine lines
+  across seven files ran past 120 while clang-format still reported the tree clean. That key is gone
+  now.
+- A long call on the right of an assignment wraps inside its argument list rather than after the
+  `=`, because a callee stranded on its own line hides which variable is written. `Winsock/` gets it
+  from `PenaltyBreakAssignment: 100`, over the default of 2; `linux/` breaks the same way by hand.
 
 Rules no formatter can check, applied to every source in both trees:
 
 - Prefix `++i`, never `i++`, and no assignment or `++`/`--` inside a larger expression: never
   `foo(i++)`, `buf[i++]`, `*p++`, or an assignment in a condition. Testing a call's return in place,
-  `if (listen(fd, backlog) < 0)`, is the one exception, taken 114 times.
-- Locals are declared in one block at the top of the function body, and only side-effect-free
-  initializers stay on the declaration. One declaration per name per function, no shadowing.
+  `if (listen(fd, backlog) < 0)`, is the one exception.
+- `Winsock/` declares locals in one block at the top of the function body, and only side-effect-free
+  initializers stay on the declaration; `linux/` declares each local where it is first used, as the
+  coding style asks. One declaration per name per function, no shadowing.
 - Header prototypes are packed by concern with a blank line between groups, never one blank line per
   declaration. The grouping is what carries the information.
 - Macro names are upper case, always. The case is the only warning that `LOG_MSG_HELPER` and
@@ -94,7 +107,7 @@ any moment, even where the program is single threaded and installs no handler:
   states neither `sa_mask` nor `SA_RESTART`. `register_signal_handler_helper` takes the flag as an
   argument, because the choice belongs to the signal's purpose and not to a house default.
 - A handler stores the signal number it was given into a `volatile sig_atomic_t` and does nothing
-  else, so `which_shutdown_signal_helper()` can say whether `SIGINT` or `SIGTERM` ended the run, with
+  else, so `get_shutdown_signal_helper()` can say whether `SIGINT` or `SIGTERM` ended the run, with
   no `(void)` cast and no unused attribute. Doing more is the hazard: the handler runs on the
   interrupted thread and shares its `errno`, and one `close()` in a handler turned a waiting `ERANGE`
   into `EBADF` before the interrupted line ever looked at it.
@@ -189,14 +202,14 @@ cscope -dL -1 nl_recv_or_shutdown_helper     # where is it defined
 cscope -dL -3 wait_ready_or_shutdown_helper  # who calls it
 ```
 
-`compile_commands.json` comes from the Makefile rather than from `bear`, so it tracks the flags above
-without a second tool. It has to reproduce the build exactly: `-std=c99` defines `__STRICT_ANSI__`,
-which hides `sigset_t`, so every executable defines `_POSIX_C_SOURCE 200809L` before its first
-include, and library objects reach the same place through their own `#define _GNU_SOURCE`. Before
-that macro the executable rule compiled only because `$(LDFLAGS)` put `-pthread` on the same
-invocation, whose `_REENTRANT` glibc's `features.h` maps to `_POSIX_C_SOURCE 199506L` (not
-`_DEFAULT_SOURCE`); without `-pthread` on the executable entries clangd answered with 316 errors
-over the tree.
+`compile_commands.json` comes from the Makefile rather than from `bear`, so it tracks the flags
+above without a second tool. It has to reproduce the build exactly: `-std=c99` defines
+`__STRICT_ANSI__`, which hides `sigset_t`, so every source file defines the narrowest feature test
+macro it needs before its first include: `_POSIX_C_SOURCE 200809L` where POSIX is enough,
+`_DEFAULT_SOURCE` or `_GNU_SOURCE` where the file calls beyond it. Before those macros the
+executable rule compiled only because `$(LDFLAGS)` put `-pthread` on the same invocation, whose
+`_REENTRANT` glibc's `features.h` maps to `_POSIX_C_SOURCE 199506L` (not `_DEFAULT_SOURCE`); without
+`-pthread` on the executable entries clangd answered with 316 errors over the tree.
 
 `linux/.clangd` hands `.h` files `-pthread`. A header opened on its own has no entry, so clangd borrows
 one from a file that includes it; `net_util.h` drew `net_util.c`, which carries no `-pthread`, and
@@ -252,14 +265,15 @@ The tcp, udp and splice servers all bind 5000, so those stanzas run one at a tim
   `tcp_accept_helper`, `tcp_connect_helper` (on `POLLOUT`, for the non-blocking connect),
   `wait_ready_or_shutdown_helper`, `recv_or_shutdown_helper`, `recvfrom_or_shutdown_helper`,
   `send_all_or_shutdown_helper`. `tcp_listen_helper`, `udp_bind_helper` and `udp_connect_helper`
-  take none. `format_addr_helper` and
-  `format_peer_helper` render a peer as `address:port`; the signal side is `ignore_sigpipe_helper`,
-  `register_signal_handler_helper`, `catch_shutdown_signals_helper`, `should_shut_down_helper` and
-  `which_shutdown_signal_helper`. A wait ends three ways, told apart at the call site: readiness
-  returns normally, a shutdown shows up as `should_shut_down_helper()`, anything else leaves the
-  kernel's own `errno` in place. That is what lets a server print `stopped by signal 15` and exit 0
-  while still reporting a real failure as one. `tcp_listen_helper` takes only a port and a backlog,
-  and sets `SO_REUSEADDR` where it can be read.
+  take none. `format_addr_helper` and `format_peer_helper` render a peer as `address:port`, and
+  `close_keeping_errno_helper` closes a descriptor on an error path without touching `errno`; the
+  signal side is `ignore_sigpipe_helper`, `register_signal_handler_helper`,
+  `catch_shutdown_signals_helper`, `should_shut_down_helper` and `get_shutdown_signal_helper`. A
+  wait ends three ways, told apart at the call site: readiness returns normally, a shutdown shows up
+  as `should_shut_down_helper()`, anything else leaves the kernel's own `errno` in place. That is
+  what lets a server print `stopped by signal 15` and exit 0 while still reporting a real failure as
+  one. `tcp_listen_helper` takes only a port and a backlog, and sets `SO_REUSEADDR` where it can be
+  read.
 - `common/log.{c,h}` — every emitted line goes through one module and the macro name says which
   stream it lands on: `LOG_MSG_HELPER` and `LOG_ERRNO_HELPER` write `program: function(): text` to
   stderr, `LOG_RESULT_HELPER` writes `program: text` to stdout. No call site repeats its own name or
@@ -270,12 +284,12 @@ The tcp, udp and splice servers all bind 5000, so those stanzas run one at a tim
   was killed first. `LOG_RESULT_HELPER` therefore flushes once, in one place; stderr is unbuffered,
   so `LOG_ERRNO_HELPER` does not.
 - `netlink/nl_util.{c,h}` — `nl_open_helper`, `nl_join_group_helper`, `nl_set_rcvbuf_helper`,
-  `nl_send_helper`, `nl_recv_helper`, `nl_recv_or_shutdown_helper`, `nl_add_attr_helper`,
-  `nl_parse_attrs_helper`, `nl_check_error_helper`, `nl_check_done_helper`, `nl_next_seq_helper`. It
-  sits beside its only consumer rather than in `common/`, which is for code more than one topic uses;
-  a helper moves there on the second caller, the way iproute2 keeps `lib/libnetlink.c` in a library
-  directory for `ip`, `ss`, `tc` and `bridge`. The Makefile's `TOPIC_LIB_SRCS` marks such a file as a
-  library object: compiled, not linked as a program of its own.
+  `nl_send_helper`, `nl_recv_or_shutdown_helper`, `nl_add_attr_helper`, `nl_parse_attrs_helper`,
+  `nl_check_error_helper`, `nl_check_done_helper`, `nl_next_seq_helper`. It sits beside its only
+  consumer rather than in `common/`, which is for code more than one topic uses; a helper moves
+  there on the second caller, the way iproute2 keeps `lib/libnetlink.c` in a library directory for
+  `ip`, `ss`, `tc` and `bridge`. The Makefile's `TOPIC_LIB_SRCS` marks such a file as a library
+  object: compiled, not linked as a program of its own.
 - `tcp/` — `tcp_echo_server.c`, `tcp_echo_client.c`. `udp/` — `udp_echo_server.c`,
   `udp_echo_client.c`.
 - `zerocopy/` — `sendfile_server.c`, `sendfile_client.c`, `splice_echo_server.c`,
@@ -406,6 +420,6 @@ Winsock/
 Per-platform vocabulary, no shared abstraction: `tcp_listen_helper` against `ListenTcpHelper`,
 `LOG_ERRNO_HELPER` against `NET_PERROR_HELPER`, `format_peer_helper` against `FormatPeerHelper`,
 `errno` against `WSAGetLastError`. Both echo servers name the peer they read from, and both split
-stdout results from stderr diagnostics. Style comes from the root `.editorconfig` (`[Winsock/**]`:
-CRLF) and `Winsock/.clang-format` (Microsoft base, Allman braces, forced braces on one-line bodies,
-left-aligned pointers, `SortIncludes` off).
+stdout results from stderr diagnostics. Style comes from `Winsock/.editorconfig` (CRLF,
+`root = true`) and `Winsock/.clang-format` (Microsoft base, Allman braces, forced braces on one-line
+bodies, left-aligned pointers, `SortIncludes` off).

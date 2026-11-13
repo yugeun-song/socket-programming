@@ -1,12 +1,11 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
-#include <stdio.h>
-#include <unistd.h>
-
-#include <sys/socket.h>
-
 #include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "common/log.h"
 #include "common/net_util.h"
@@ -17,58 +16,56 @@
 
 int main(void)
 {
-    char log_buf[ADDR_TEXT_MAX_HELPER] = { 0 };
-    struct sockaddr_in peer_addr = { 0 };
     sigset_t wait_signal_mask;
-    char recv_buf[BUF_SIZE_HELPER];
-    ssize_t received_bytes;
-    size_t send_len;
-    int send_status;
-    int server_fd;
-    int client_fd;
 
     if (catch_shutdown_signals_helper(&wait_signal_mask) < 0) {
         LOG_ERRNO_HELPER("catch_shutdown_signals_helper()");
-        return 1;
+        return EXIT_FAILURE;
     }
     if (ignore_sigpipe_helper() < 0) {
         LOG_ERRNO_HELPER("sigaction(SIGPIPE)");
-        return 1;
+        return EXIT_FAILURE;
     }
 
-    server_fd = tcp_listen_helper(PORT_HELPER, BACKLOG_HELPER);
+    int server_fd = tcp_listen_helper(PORT_HELPER, BACKLOG_HELPER);
     if (server_fd < 0) {
         LOG_ERRNO_HELPER("tcp_listen_helper()");
-        return 1;
+        return EXIT_FAILURE;
     }
 
     LOG_MSG_HELPER("listening on port %d", PORT_HELPER);
 
-    client_fd = tcp_accept_helper(server_fd, &peer_addr, &wait_signal_mask);
+    int exit_status = EXIT_FAILURE;
+    struct sockaddr_in peer_addr = { 0 };
+
+    int client_fd = tcp_accept_helper(server_fd, &peer_addr, &wait_signal_mask);
     if (client_fd < 0) {
-        if (should_shut_down_helper()) {
-            LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
-            close(server_fd);
-            return 0;
+        if (should_shut_down_helper() != 0) {
+            LOG_MSG_HELPER("stopped by signal %d", get_shutdown_signal_helper());
+            exit_status = 0;
+        } else {
+            LOG_ERRNO_HELPER("tcp_accept_helper()");
         }
-        LOG_ERRNO_HELPER("tcp_accept_helper()");
-        close(server_fd);
-        return 1;
+        goto out_close_server;
     }
-    if (format_addr_helper(&peer_addr, log_buf, sizeof(log_buf)) < 0) {
+
+    char log_buf[ADDR_TEXT_MAX_HELPER] = { 0 };
+
+    if (format_addr_helper(log_buf, sizeof(log_buf), &peer_addr) < 0) {
         LOG_ERRNO_HELPER("format_addr_helper()");
-        close(client_fd);
-        close(server_fd);
-        return 1;
+        goto out_close_client;
     }
 
     LOG_MSG_HELPER("accepted %s", log_buf);
 
-    while (1) {
-        received_bytes = recv_or_shutdown_helper(client_fd, recv_buf, sizeof(recv_buf), &wait_signal_mask);
+    char recv_buf[BUF_SIZE_HELPER];
+
+    for (;;) {
+        ssize_t received_bytes = recv_or_shutdown_helper(client_fd, recv_buf, sizeof(recv_buf),
+                                                         &wait_signal_mask);
         if (received_bytes < 0) {
-            if (should_shut_down_helper()) {
-                LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
+            if (should_shut_down_helper() != 0) {
+                LOG_MSG_HELPER("stopped by signal %d", get_shutdown_signal_helper());
             } else if (errno == ETIMEDOUT) {
                 LOG_MSG_HELPER("%s stopped answering, TCP gave up on the connection", log_buf);
             } else {
@@ -82,11 +79,12 @@ int main(void)
 
         LOG_RESULT_HELPER("received %zd bytes from %s", received_bytes, log_buf);
 
-        send_len = (size_t)received_bytes;
-        send_status = send_all_or_shutdown_helper(client_fd, recv_buf, send_len, &wait_signal_mask);
+        size_t send_len = (size_t)received_bytes;
+        int send_status = send_all_or_shutdown_helper(client_fd, recv_buf, send_len,
+                                                      &wait_signal_mask);
         if (send_status < 0) {
-            if (should_shut_down_helper()) {
-                LOG_MSG_HELPER("stopped by signal %d", which_shutdown_signal_helper());
+            if (should_shut_down_helper() != 0) {
+                LOG_MSG_HELPER("stopped by signal %d", get_shutdown_signal_helper());
             } else if (errno == ETIMEDOUT) {
                 LOG_MSG_HELPER("%s stopped answering, TCP gave up on the connection", log_buf);
             } else {
@@ -96,7 +94,11 @@ int main(void)
         }
     }
 
+    exit_status = 0;
+
+out_close_client:
     close(client_fd);
+out_close_server:
     close(server_fd);
-    return 0;
+    return exit_status;
 }

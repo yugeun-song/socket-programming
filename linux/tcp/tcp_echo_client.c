@@ -2,10 +2,10 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include "common/log.h"
 #include "common/net_util.h"
@@ -13,56 +13,56 @@
 #define PORT_HELPER 5000
 #define BUF_SIZE_HELPER 1024
 
-int main(int argc, char **argv)
+int main(int argc, char *argv[])
 {
     const char *host = (argc > 1) ? argv[1] : "127.0.0.1";
     const char *text_to_send = (argc > 2) ? argv[2] : "hello, socket";
-    char log_buf[ADDR_TEXT_MAX_HELPER] = { 0 };
-    char recv_buf[BUF_SIZE_HELPER];
-    size_t received_total = 0;
-    size_t expected_total;
-    size_t chunk_len;
-    size_t text_len;
-    ssize_t received_bytes;
-    int fd;
 
     if (ignore_sigpipe_helper() < 0) {
         LOG_ERRNO_HELPER("sigaction(SIGPIPE)");
-        return 1;
+        return EXIT_FAILURE;
     }
-    fd = tcp_connect_helper(host, PORT_HELPER, NULL);
+
+    int fd = tcp_connect_helper(host, PORT_HELPER, NULL);
     if (fd < 0) {
         if (errno == ETIMEDOUT) {
             LOG_MSG_HELPER("no answer from %s, TCP gave up establishing the connection", host);
         } else {
             LOG_ERRNO_HELPER("tcp_connect_helper()");
         }
-        return 1;
+        return EXIT_FAILURE;
     }
+
+    int exit_status = EXIT_FAILURE;
+    char log_buf[ADDR_TEXT_MAX_HELPER] = { 0 };
+
     if (format_peer_helper(fd, log_buf, sizeof(log_buf)) < 0) {
         LOG_ERRNO_HELPER("format_peer_helper()");
-        close(fd);
-        return 1;
+        goto out_close_fd;
     }
 
     LOG_MSG_HELPER("connected to %s", log_buf);
 
-    text_len = strlen(text_to_send);
+    size_t text_len = strlen(text_to_send);
+
     if (send_all_or_shutdown_helper(fd, text_to_send, text_len, NULL) < 0) {
         LOG_ERRNO_HELPER("send()");
-        close(fd);
-        return 1;
+        goto out_close_fd;
     }
 
-    expected_total = (text_len < sizeof(recv_buf) - 1) ? text_len : sizeof(recv_buf) - 1;
+    char recv_buf[BUF_SIZE_HELPER];
+    size_t expected_total = (text_len < sizeof(recv_buf) - 1) ? text_len : sizeof(recv_buf) - 1;
     if (expected_total < text_len) {
-        LOG_MSG_HELPER("reading back only %zu of the %zu bytes sent, the buffer holds no more", expected_total,
-                       text_len);
+        LOG_MSG_HELPER("reading back only %zu of the %zu bytes sent, the buffer holds no more",
+                       expected_total, text_len);
     }
+
+    size_t received_total = 0;
 
     while (received_total < expected_total) {
-        chunk_len = expected_total - received_total;
-        received_bytes = recv_or_shutdown_helper(fd, recv_buf + received_total, chunk_len, NULL);
+        size_t chunk_len = expected_total - received_total;
+        ssize_t received_bytes = recv_or_shutdown_helper(fd, recv_buf + received_total,
+                                                         chunk_len, NULL);
         if (received_bytes < 0) {
             if (errno == ETIMEDOUT) {
                 LOG_MSG_HELPER("%s stopped answering, TCP gave up on the connection", log_buf);
@@ -79,7 +79,9 @@ int main(int argc, char **argv)
     recv_buf[received_total] = '\0';
 
     LOG_RESULT_HELPER("received '%s' (%zu bytes) from %s", recv_buf, received_total, log_buf);
+    exit_status = 0;
 
+out_close_fd:
     close(fd);
-    return 0;
+    return exit_status;
 }

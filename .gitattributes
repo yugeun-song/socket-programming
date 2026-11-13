@@ -5,6 +5,7 @@ Winsock/**  text eol=crlf
 
 # Visual Studio project metadata is CRLF regardless of location
 *.sln              text eol=crlf
+*.slnx             text eol=crlf
 *.vcxproj          text eol=crlf
 *.vcxproj.filters  text eol=crlf
 *.vcxproj.user     text eol=crlf

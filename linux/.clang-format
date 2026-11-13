@@ -1,42 +1,29 @@
----
-Language: Cpp
 BasedOnStyle: LLVM
 IndentWidth: 4
-TabWidth: 4
-UseTab: Never
+ColumnLimit: 0
 BreakBeforeBraces: Custom
 BraceWrapping:
     AfterFunction: true
-    AfterControlStatement: Never
-    AfterStruct: false
-    AfterUnion: false
-    AfterEnum: false
-    AfterClass: false
-    BeforeElse: false
-    BeforeCatch: false
-    IndentBraces: false
 InsertBraces: true
-AllowShortBlocksOnASingleLine: false
-AllowShortIfStatementsOnASingleLine: false
-AllowShortLoopsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: None
 AllowShortEnumsOnASingleLine: false
-PointerAlignment: Right
-ColumnLimit: 120
-PenaltyBreakAssignment: 100
 Cpp11BracedListStyle: false
-SpaceInEmptyBraces: Always
-SortIncludes: CaseSensitive
+AlignTrailingComments:
+    Kind: Never
+AlignEscapedNewlines: Left
+IndentPPDirectives: AfterHash
+PPIndentWidth: 1
 IncludeBlocks: Regroup
-IncludeIsMainRegex: '$'
 IncludeCategories:
-    - Regex: '^<sys/'
-      Priority: 3
-    - Regex: '^<(arpa|net|netinet)/'
-      Priority: 4
-    - Regex: '^<linux/'
-      Priority: 5
+    - Regex: '^<readline/'
+      Priority: 1
+      SortPriority: 2
+    - Regex: '^<linux/errqueue\.h>$'
+      Priority: 1
+      SortPriority: 2
     - Regex: '^<'
-      Priority: 2
+      Priority: 1
+      SortPriority: 1
     - Regex: '^"'
-      Priority: 6
+      Priority: 3
+InsertNewlineAtEOF: true
