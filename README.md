@@ -164,14 +164,14 @@ make -C linux                 # debug and sanitize builds, one job per CPU unles
 make -C linux PROFILE=release # the release build instead; index and unused take its flags too
 make -C linux debug           # linux/bin/<arch>-linux-<cc>-debug/<topic>/<name>: -O0, full debug info, -pg
 make -C linux sanitize        # the debug build with -fsanitize=address, or the list in SANITIZE=
-make -C linux release         # -O2, hardened, LTO
+make -C linux release         # -O2, hardened, link-time optimization (LTO)
 make -C linux CC=clang        # any of the above with clang instead of gcc
 make -C linux index           # compile_commands.json with the PROFILE flags, tags and cscope.out
 make -C linux clean-index     # remove the index files
 make -C linux clean           # remove bin/ and build/
 make -C linux distclean       # clean, clean-index, tool outputs and .cache/
 make -C linux format          # clang-format -i over every source and header
-make -C linux format-check    # clang-format --dry-run --Werror; nonzero on drift
+make -C linux format-check    # clang-format --dry-run --Werror; nonzero when a file needs reformatting
 make -C linux unused          # unused diagnostics (clang) and unused functions (cppcheck)
 make -C linux list            # every program
 make -C linux help            # the goals, the variables and the first ten programs
