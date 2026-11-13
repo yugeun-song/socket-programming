@@ -66,10 +66,8 @@ static void print_link_helper(struct nlmsghdr *nl_header)
     }
     if (attr_table[IFLA_ADDRESS] != NULL && RTA_PAYLOAD(attr_table[IFLA_ADDRESS]) == ETH_ALEN) {
         mac_bytes = (const unsigned char *)RTA_DATA(attr_table[IFLA_ADDRESS]);
-        /* clang-format off */
         snprintf(mac_field, sizeof(mac_field), " mac %02x:%02x:%02x:%02x:%02x:%02x",
                  mac_bytes[0], mac_bytes[1], mac_bytes[2], mac_bytes[3], mac_bytes[4], mac_bytes[5]);
-        /* clang-format on */
     }
 
     snprintf(output_line, sizeof(output_line), "%2d %-10s %-9s mtu %-6u %s%s%s", link_info->ifi_index, link_name,
