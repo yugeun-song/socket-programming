@@ -418,7 +418,9 @@ from the Linux side of this repo, so nothing here is cross-compiled or stubbed.
 
 ```
 Winsock/
-|-- Winsock.slnx                     solution, x64 and x86
+|-- Winsock.slnx                     solution, x64 and x86, Debug, Sanitize and Release
+|-- Directory.Build.props            AddressSanitizer for Sanitize, LTO for Release
+|-- Directory.Build.targets          compiler and linker flags of every project
 |-- Common/NetUtils/                 NetStartupHelper, NetCleanupHelper, ListenTcpHelper,
 |                                    ConnectTcpHelper, BindUdpHelper, ConnectUdpHelper,
 |                                    SendAllHelper, FormatAddrHelper, FormatPeerHelper,
@@ -433,3 +435,9 @@ Per-platform vocabulary, no shared abstraction: `tcp_listen_helper` against `Lis
 stdout results from stderr diagnostics. Style comes from `Winsock/.editorconfig` (CRLF,
 `root = true`) and `Winsock/.clang-format` (Microsoft base, Allman braces, forced braces on one-line
 bodies, left-aligned pointers, `SortIncludes` off).
+
+Build settings come from `Winsock/Directory.Build.props` and `Winsock/Directory.Build.targets`,
+which MSBuild imports into every project under `Winsock/`, a new one included. They carry the
+counterparts of the `linux/` build flags: Debug is `/Od /Ob0 /Oi- /Zi /JMC- /GS-` without `/sdl`,
+`/RTC` or ASLR, Sanitize adds AddressSanitizer, and Release is `/O2 /sdl /guard:cf` with LTO,
+`/CETCOMPAT` and ASLR. Every configuration gets `/W4 /utf-8 /Zc:preprocessor`.
