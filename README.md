@@ -161,28 +161,32 @@ to end, so it serves datagrams until a signal stops it.
 
 ```sh
 make -C linux                 # debug and sanitize builds, one job per CPU unless -j is given
+make -C linux PROFILE=release # the release build instead; index and unused take its flags too
 make -C linux debug           # linux/bin/<arch>-linux-<cc>-debug/<topic>/<name>: -O0, full debug info, -pg
 make -C linux sanitize        # the debug build with -fsanitize=address, or the list in SANITIZE=
 make -C linux release         # -O2, hardened, LTO
 make -C linux CC=clang        # any of the above with clang instead of gcc
-make -C linux index           # compile_commands.json, tags and cscope.out (also compdb, tags, cscope)
+make -C linux index           # compile_commands.json with the PROFILE flags, tags and cscope.out
 make -C linux clean-index     # remove the index files
 make -C linux clean           # remove bin/ and build/
 make -C linux distclean       # clean, clean-index, tool outputs and .cache/
 make -C linux format          # clang-format -i over every source and header
 make -C linux format-check    # clang-format --dry-run --Werror; nonzero on drift
+make -C linux unused          # unused diagnostics (clang) and unused functions (cppcheck)
+make -C linux help            # the goals, the variables and the programs
 ```
 
-`linux/mk/c.mk` holds the rules and flag tables shared with the other repositories that build with
+`linux/build.mk` holds the rules and flag tables shared with the other repositories that build with
 Make; `linux/Makefile` keeps the program list and the flags of this tree. Every mode and compiler
 builds into its own directories under `bin/` and `build/`, and every object depends on both
 makefiles, so switching modes or editing a flag never reuses a stale object. A flag the compiler or
-the target rejects is dropped after a probe, and the build names the dropped flags once.
+the target rejects is dropped after a probe. The probe prints the flags of every mode once, and every
+goal ends with a `=>` line that names what it produced and where.
 
 `tags`, `cscope.out` and `compile_commands.json` come from `make -C linux index`, not from the
 default build, and `make -C linux clean-index` removes exactly those files.
 
-`-MMD -MP` has the compiler record what each object included, and `mk/c.mk` includes those lists
+`-MMD -MP` has the compiler record what each object included, and `build.mk` includes those lists
 back. Without them a header edit rebuilt nothing: changing
 `ADDR_TEXT_MAX_HELPER` in `net_util.h` left every binary byte-identical while make reported success.
 
@@ -204,19 +208,19 @@ cscope -dL -1 nl_recv_or_shutdown_helper     # where is it defined
 cscope -dL -3 wait_ready_or_shutdown_helper  # who calls it
 ```
 
-`compile_commands.json` comes from `mk/c.mk` rather than from `bear`, and it carries the debug
-flags, so it tracks the build without a second tool. It has to reproduce the build exactly:
+`compile_commands.json` comes from `build.mk` rather than from `bear`, and it carries the flags of
+`PROFILE`, debug by default, so it tracks the build without a second tool. It has to reproduce the build exactly:
 `-std=c99` defines `__STRICT_ANSI__`, which hides `sigset_t`, so every source file defines the
 narrowest feature test macro it needs before its first include: `_POSIX_C_SOURCE 200809L` where
 POSIX is enough, `_DEFAULT_SOURCE` or `_GNU_SOURCE` where the file calls beyond it. Objects compile
-without `-pthread`, which only reaches the link, so nothing else supplies those macros.
+and link with `-pthread`, as GCC asks for both steps. It defines `_REENTRANT`, which glibc reads as
+`_POSIX_C_SOURCE 199506L`; every source asks for more, so no object changes.
 
-`linux/.clangd` hands `.h` files `-pthread`. A header opened on its own has no entry, so clangd borrows
-one from a file that includes it; `net_util.h` drew `net_util.c`, which carries no `-pthread`, and
-reported six `unknown type name 'sigset_t'`. `-pthread` rather than `-D_GNU_SOURCE` because it is the
-thinnest environment any includer supplies: `_GNU_SOURCE` opens `__USE_GNU` and 19 more `__USE_*`, so a
-header could declare a GNU-only call, read clean on its own, and still break `tcp_echo_server.c`. The
-same file drops `UnusedIncludes`, because clangd reads `sigset_t` as coming from
+A header opened on its own has no entry, so clangd borrows one from a file that includes it, without
+the macros that file defines. The borrowed `-pthread` still exposes `sigset_t`. That environment is
+thinner than any includer's, whereas `-D_GNU_SOURCE` opens `__USE_GNU` and 19 more `__USE_*`, so a
+header could declare a GNU-only call, read clean on its own, and still break `tcp_echo_server.c`.
+`linux/.clangd` drops `UnusedIncludes`, because clangd reads `sigset_t` as coming from
 `bits/types/__sigset_t.h` and calls the `<signal.h>` that supplies it unused, and suppresses the five
 `unused-*` diagnostics: a handler installed through `sigaction` carries the signature the API fixes,
 `(int, siginfo_t *, void *)` under `SA_SIGINFO`, and one that only raises a flag reads none of it.
