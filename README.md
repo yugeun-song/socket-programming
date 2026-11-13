@@ -161,6 +161,7 @@ to end, so it serves datagrams until a signal stops it.
 
 ```sh
 make -C linux                 # binaries at linux/bin/<topic>/<name>, plus tags, cscope.out and compile_commands.json
+make -C linux CC=clang        # the same build with clang instead of cc
 make -C linux clean && make -C linux GPROF=1    # -pg for gprof / mcount-based uftrace
 make -C linux symbols         # the symbol index on its own
 make -C linux tags            # ctags only
