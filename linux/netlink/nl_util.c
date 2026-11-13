@@ -128,8 +128,8 @@ int nl_add_attr_helper(struct nlmsghdr *const mut_nl_header, size_t capacity, un
     return 0;
 }
 
-void nl_parse_attrs_helper(const struct rtattr *const attrs, int len,
-                           struct rtattr **const mut_attr_table, unsigned short max)
+void nl_parse_attrs_helper(struct rtattr **const mut_attr_table, unsigned short max,
+                           const struct rtattr *const attrs, int len)
 {
     memset(mut_attr_table, 0, sizeof(*mut_attr_table) * ((size_t)max + 1));
 
@@ -179,7 +179,7 @@ int nl_check_done_helper(const struct nlmsghdr *const nl_header)
     return -1;
 }
 
-unsigned int nl_next_seq_helper(void)
+unsigned int nl_get_next_seq_helper(void)
 {
     static pthread_mutex_t s_counter_lock = PTHREAD_MUTEX_INITIALIZER;
     static unsigned int s_counter;

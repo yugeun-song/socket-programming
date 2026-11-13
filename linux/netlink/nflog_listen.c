@@ -47,7 +47,7 @@ static int nfl_configure_helper(int fd, unsigned short group, unsigned short att
 
     memset(&request, 0, sizeof(request));
 
-    unsigned int seq = nl_next_seq_helper();
+    unsigned int seq = nl_get_next_seq_helper();
     struct nfgenmsg *nf_header = NLMSG_DATA(&request.nl_header);
 
     request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(*nf_header));
@@ -118,8 +118,8 @@ static void print_packet_helper(const struct nlmsghdr *const nl_header)
                                                          NLMSG_ALIGN(sizeof(struct nfgenmsg)));
     struct rtattr *attr_table[NFULA_MAX + 1];
 
-    nl_parse_attrs_helper(attrs, (int)NLMSG_PAYLOAD(nl_header, sizeof(struct nfgenmsg)),
-                          attr_table, NFULA_MAX);
+    nl_parse_attrs_helper(attr_table, NFULA_MAX, attrs,
+                          (int)NLMSG_PAYLOAD(nl_header, sizeof(struct nfgenmsg)));
 
     if (attr_table[NFULA_PACKET_HDR] == NULL || attr_table[NFULA_PAYLOAD] == NULL) {
         return;

@@ -85,7 +85,7 @@ static void print_addr_helper(const struct nlmsghdr *const nl_header)
     const struct ifaddrmsg *addr_info = NLMSG_DATA(nl_header);
     struct rtattr *attr_table[IFA_MAX + 1];
 
-    nl_parse_attrs_helper(IFA_RTA(addr_info), (int)IFA_PAYLOAD(nl_header), attr_table, IFA_MAX);
+    nl_parse_attrs_helper(attr_table, IFA_MAX, IFA_RTA(addr_info), (int)IFA_PAYLOAD(nl_header));
 
     const struct rtattr *addr_attr = attr_table[IFA_LOCAL];
     if (addr_attr == NULL) {
@@ -111,7 +111,7 @@ static void print_addr_helper(const struct nlmsghdr *const nl_header)
 
 static int list_addrs_helper(int fd)
 {
-    unsigned int seq = nl_next_seq_helper();
+    unsigned int seq = nl_get_next_seq_helper();
     struct addr_request request = { 0 };
 
     request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(request.addr_info));
@@ -171,7 +171,7 @@ static int change_addr_helper(int fd, unsigned short msg_type, unsigned short ex
 
     memset(&request, 0, sizeof(request));
 
-    unsigned int seq = nl_next_seq_helper();
+    unsigned int seq = nl_get_next_seq_helper();
     struct ifaddrmsg *addr_info = NLMSG_DATA(&request.nl_header);
 
     request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(*addr_info));

@@ -40,7 +40,7 @@ static void print_link_event_helper(const struct nlmsghdr *const nl_header)
     const struct ifinfomsg *link_info = NLMSG_DATA(nl_header);
     struct rtattr *attr_table[IFLA_MAX + 1];
 
-    nl_parse_attrs_helper(IFLA_RTA(link_info), (int)IFLA_PAYLOAD(nl_header), attr_table, IFLA_MAX);
+    nl_parse_attrs_helper(attr_table, IFLA_MAX, IFLA_RTA(link_info), (int)IFLA_PAYLOAD(nl_header));
 
     const char *link_name = "?";
 
@@ -57,7 +57,7 @@ static void print_addr_event_helper(const struct nlmsghdr *const nl_header)
     const struct ifaddrmsg *addr_info = NLMSG_DATA(nl_header);
     struct rtattr *attr_table[IFA_MAX + 1];
 
-    nl_parse_attrs_helper(IFA_RTA(addr_info), (int)IFA_PAYLOAD(nl_header), attr_table, IFA_MAX);
+    nl_parse_attrs_helper(attr_table, IFA_MAX, IFA_RTA(addr_info), (int)IFA_PAYLOAD(nl_header));
 
     const struct rtattr *addr_attr = attr_table[IFA_LOCAL];
     if (addr_attr == NULL) {
@@ -87,7 +87,7 @@ static void print_route_event_helper(const struct nlmsghdr *const nl_header)
     const struct rtmsg *route_info = NLMSG_DATA(nl_header);
     struct rtattr *attr_table[RTA_MAX + 1];
 
-    nl_parse_attrs_helper(RTM_RTA(route_info), (int)RTM_PAYLOAD(nl_header), attr_table, RTA_MAX);
+    nl_parse_attrs_helper(attr_table, RTA_MAX, RTM_RTA(route_info), (int)RTM_PAYLOAD(nl_header));
 
     char addr_text[INET6_ADDRSTRLEN] = { 0 };
 

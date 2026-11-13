@@ -39,8 +39,9 @@ static void print_family_helper(const struct nlmsghdr *const nl_header)
     const char *message_data = NLMSG_DATA(nl_header);
     struct rtattr *attr_table[CTRL_ATTR_MAX + 1];
 
-    nl_parse_attrs_helper((const struct rtattr *)(message_data + GENL_HDRLEN),
-                          (int)NLMSG_PAYLOAD(nl_header, GENL_HDRLEN), attr_table, CTRL_ATTR_MAX);
+    nl_parse_attrs_helper(attr_table, CTRL_ATTR_MAX,
+                          (const struct rtattr *)(message_data + GENL_HDRLEN),
+                          (int)NLMSG_PAYLOAD(nl_header, GENL_HDRLEN));
 
     const char *name = "?";
     unsigned short id = 0;
@@ -72,7 +73,7 @@ int main(void)
     }
 
     int exit_status = EXIT_FAILURE;
-    unsigned int seq = nl_next_seq_helper();
+    unsigned int seq = nl_get_next_seq_helper();
     struct genl_request request = { 0 };
 
     request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(request.genl));

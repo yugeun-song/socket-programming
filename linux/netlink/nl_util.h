@@ -19,11 +19,11 @@ ssize_t nl_recv_or_shutdown_helper(int fd, void *const mut_recv_buf, size_t len,
 
 int nl_add_attr_helper(struct nlmsghdr *const mut_nl_header, size_t capacity, unsigned short type,
                        const void *const data_nullable, unsigned short len);
-void nl_parse_attrs_helper(const struct rtattr *const attrs, int len,
-                           struct rtattr **const mut_attr_table, unsigned short max);
+void nl_parse_attrs_helper(struct rtattr **const mut_attr_table, unsigned short max,
+                           const struct rtattr *const attrs, int len);
 
 int nl_check_error_helper(const struct nlmsghdr *const nl_header);
 int nl_check_done_helper(const struct nlmsghdr *const nl_header);
-unsigned int nl_next_seq_helper(void);
+unsigned int nl_get_next_seq_helper(void);
 
 #endif /* NETLINK_NL_UTIL_H */

@@ -77,7 +77,7 @@ int main(void)
     }
 
     int exit_status = EXIT_FAILURE;
-    unsigned int seq = nl_next_seq_helper();
+    unsigned int seq = nl_get_next_seq_helper();
     struct diag_request request = { 0 };
 
     request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(request.diag));
