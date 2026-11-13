@@ -86,7 +86,7 @@ int main(void)
         socklen_t zerocopy_len = sizeof(zerocopy);
 
         memset(&zerocopy, 0, sizeof(zerocopy));
-        zerocopy.address = (uint64_t)(uintptr_t)mapped_area;
+        zerocopy.address = (uint64_t)((uintptr_t)mapped_area);
         zerocopy.length = MAP_SIZE_HELPER;
 
         if (getsockopt(client_fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE, &zerocopy,
