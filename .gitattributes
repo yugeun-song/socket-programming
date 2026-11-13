@@ -1,5 +1,5 @@
 # LF in the repo and in the working tree, except the Winsock tree, which is CRLF
-* text=auto eol=lf
+* text eol=lf
 linux/**    text eol=lf
 Winsock/**  text eol=crlf
 
@@ -21,3 +21,11 @@ Winsock/**  text eol=crlf
 *.a   binary
 *.pdb binary
 *.bin binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz  binary
+*.xz  binary
