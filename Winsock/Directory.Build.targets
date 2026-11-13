@@ -8,10 +8,13 @@
       <UseStandardPreprocessor Condition="'$(PlatformToolset)' != 'ClangCL'">true</UseStandardPreprocessor>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <TreatSpecificWarningsAsErrors>4774;%(TreatSpecificWarningsAsErrors)</TreatSpecificWarningsAsErrors>
+      <GuardEHContMetadata Condition="'$(Platform)' == 'x64'">true</GuardEHContMetadata>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <LinkIncremental>false</LinkIncremental>
+      <LinkGuardEHContMetadata Condition="'$(Platform)' == 'x64'">true</LinkGuardEHContMetadata>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Sanitize'">
@@ -22,6 +25,7 @@
       <SupportJustMyCode>false</SupportJustMyCode>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <SDLCheck>false</SDLCheck>
+      <TreatSpecificWarningsAsErrors>4146;4308;4532;4533;4700;4703;4789;4995;4996;%(TreatSpecificWarningsAsErrors)</TreatSpecificWarningsAsErrors>
       <BufferSecurityCheck>false</BufferSecurityCheck>
     </ClCompile>
     <Link>
@@ -52,7 +56,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(PlatformToolset)' == 'ClangCL'">
     <ClCompile>
-      <AdditionalOptions>-Wshadow /clang:-pedantic /clang:-fno-omit-frame-pointer %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-Wshadow /clang:-pedantic -Werror=format-security /clang:-fno-omit-frame-pointer %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(PlatformToolset)' == 'ClangCL' And ('$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Sanitize')">

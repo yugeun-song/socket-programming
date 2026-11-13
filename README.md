@@ -439,5 +439,6 @@ bodies, left-aligned pointers, `SortIncludes` off).
 Build settings come from `Winsock/Directory.Build.props` and `Winsock/Directory.Build.targets`,
 which MSBuild imports into every project under `Winsock/`, a new one included. They carry the
 counterparts of the `linux/` build flags: Debug is `/Od /Ob0 /Oi- /Zi /JMC- /GS-` without `/sdl`,
-`/RTC` or ASLR, Sanitize adds AddressSanitizer, and Release is `/O2 /sdl /guard:cf` with LTO,
-`/CETCOMPAT` and ASLR. Every configuration gets `/W4 /utf-8 /Zc:preprocessor`.
+`/RTC` or ASLR but with the warnings `/sdl` makes errors, Sanitize adds AddressSanitizer, and
+Release is `/O2 /sdl /guard:cf` with LTO, `/CETCOMPAT` and ASLR. Every configuration gets
+`/W4 /utf-8 /Zc:preprocessor /we4774`, and the x64 builds `/guard:ehcont`.
