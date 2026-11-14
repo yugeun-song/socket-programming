@@ -43,7 +43,6 @@
       <SDLCheck>true</SDLCheck>
       <BufferSecurityCheck>true</BufferSecurityCheck>
       <ControlFlowGuard>Guard</ControlFlowGuard>
-      <OmitFramePointers Condition="'$(Platform)' == 'Win32'">false</OmitFramePointers>
     </ClCompile>
     <Link>
       <OptimizeReferences>true</OptimizeReferences>

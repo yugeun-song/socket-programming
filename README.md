@@ -416,7 +416,7 @@ from the Linux side of this repo, so nothing here is cross-compiled or stubbed.
 
 ```
 Winsock/
-|-- Winsock.slnx                     solution, x64 and x86, Debug, Sanitize and Release
+|-- Winsock.slnx                     solution, x64, Debug, Sanitize and Release
 |-- Directory.Build.props            AddressSanitizer for Sanitize, LTO for Release
 |-- Directory.Build.targets          compiler and linker flags of every project
 |-- Common/NetUtils/                 NetStartupHelper, NetCleanupHelper, ListenTcpHelper,
