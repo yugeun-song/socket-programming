@@ -297,8 +297,7 @@ The tcp, udp and splice servers all bind 5000, so those stanzas run one at a tim
   `nl_get_next_seq_helper`. It sits beside its only consumer rather than in `common/`, which is for
   code more than one topic uses; a helper moves there on the second caller, the way iproute2 keeps
   `lib/libnetlink.c` in a library directory for `ip`, `ss`, `tc` and `bridge`. The Makefile's
-  `TOPIC_LIB_SRCS` marks such a file as a library object: compiled, not linked as a program of its
-  own.
+  `LIB_SRCS` marks such a file as a library object: compiled, not linked as a program of its own.
 - `tcp/` — `tcp_echo_server.c`, `tcp_echo_client.c`. `udp/` — `udp_echo_server.c`,
   `udp_echo_client.c`.
 - `zerocopy/` — `sendfile_server.c`, `sendfile_client.c`, `splice_echo_server.c`,
