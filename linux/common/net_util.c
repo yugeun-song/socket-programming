@@ -247,7 +247,7 @@ ssize_t recvfrom_or_shutdown_helper(int fd, void *const mut_recv_buf, size_t len
 int send_all_or_shutdown_helper(int fd, const void *const send_buf, size_t len,
                                 const sigset_t *const wait_signal_mask_nullable)
 {
-    const char *data = send_buf;
+    const char *const data = send_buf;
     size_t sent_total = 0;
 
     while (sent_total < len) {

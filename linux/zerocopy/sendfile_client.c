@@ -14,7 +14,7 @@
 
 int main(int argc, char *argv[])
 {
-    const char *host = (argc > 1) ? argv[1] : "127.0.0.1";
+    const char *const host = (argc > 1) ? argv[1] : "127.0.0.1";
 
     if (ignore_sigpipe_helper() < 0) {
         LOG_ERRNO_HELPER("sigaction(SIGPIPE)");

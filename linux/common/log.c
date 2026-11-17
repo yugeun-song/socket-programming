@@ -25,7 +25,7 @@ void log_write_errno_helper(const char *const func, const char *const failed_cal
 {
     char error_buf[LOG_LINE_MAX_HELPER];
     int saved_errno = errno;
-    const char *error_text = strerror_r(saved_errno, error_buf, sizeof(error_buf));
+    const char *const error_text = strerror_r(saved_errno, error_buf, sizeof(error_buf));
 
     fprintf(stderr, "%s: %s(): %s: %s\n", program_invocation_short_name, func, failed_call,
             error_text);

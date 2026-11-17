@@ -113,8 +113,8 @@ int nl_add_attr_helper(struct nlmsghdr *const mut_nl_header, size_t capacity, un
         return -1;
     }
 
-    struct rtattr *attr = (struct rtattr *)((char *)mut_nl_header + header_space);
-    unsigned char *payload = RTA_DATA(attr);
+    struct rtattr *const attr = (struct rtattr *)((char *)mut_nl_header + header_space);
+    unsigned char *const payload = RTA_DATA(attr);
 
     attr->rta_type = type;
     attr->rta_len = (unsigned short)RTA_LENGTH(len);
@@ -151,7 +151,7 @@ int nl_check_error_helper(const struct nlmsghdr *const nl_header)
         return 0;
     }
 
-    const struct nlmsgerr *error_msg = NLMSG_DATA(nl_header);
+    const struct nlmsgerr *const error_msg = NLMSG_DATA(nl_header);
 
     if (nl_header->nlmsg_len < NLMSG_LENGTH(sizeof(*error_msg))) {
         errno = EBADMSG;

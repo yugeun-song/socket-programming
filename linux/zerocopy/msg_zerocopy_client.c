@@ -51,7 +51,7 @@ static int drain_completions_helper(int fd, struct zc_stats *const mut_stats, in
         }
     }
 
-    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+    const struct cmsghdr *const cmsg = CMSG_FIRSTHDR(&msg);
     if (cmsg == NULL || cmsg->cmsg_level != IPPROTO_IP || cmsg->cmsg_type != IP_RECVERR) {
         errno = EPROTO;
         return -1;
@@ -76,7 +76,7 @@ static int drain_completions_helper(int fd, struct zc_stats *const mut_stats, in
 
 int main(int argc, char *argv[])
 {
-    const char *host = (argc > 1) ? argv[1] : "127.0.0.1";
+    const char *const host = (argc > 1) ? argv[1] : "127.0.0.1";
 
     char *send_buf = malloc(CHUNK_SIZE_HELPER);
     if (send_buf == NULL) {

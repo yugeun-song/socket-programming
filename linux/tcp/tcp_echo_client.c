@@ -15,8 +15,8 @@
 
 int main(int argc, char *argv[])
 {
-    const char *host = (argc > 1) ? argv[1] : "127.0.0.1";
-    const char *text_to_send = (argc > 2) ? argv[2] : "hello, socket";
+    const char *const host = (argc > 1) ? argv[1] : "127.0.0.1";
+    const char *const text_to_send = (argc > 2) ? argv[2] : "hello, socket";
 
     if (ignore_sigpipe_helper() < 0) {
         LOG_ERRNO_HELPER("sigaction(SIGPIPE)");

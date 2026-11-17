@@ -45,7 +45,7 @@ static const char *get_link_type_name_helper(unsigned short arp_type)
 
 static void print_link_helper(const struct nlmsghdr *const nl_header)
 {
-    const struct ifinfomsg *link_info = NLMSG_DATA(nl_header);
+    const struct ifinfomsg *const link_info = NLMSG_DATA(nl_header);
     struct rtattr *attr_table[IFLA_MAX + 1];
 
     nl_parse_attrs_helper(attr_table, IFLA_MAX, IFLA_RTA(link_info), (int)IFLA_PAYLOAD(nl_header));
@@ -65,7 +65,7 @@ static void print_link_helper(const struct nlmsghdr *const nl_header)
     char mac_field[32] = { 0 };
 
     if (attr_table[IFLA_ADDRESS] != NULL && RTA_PAYLOAD(attr_table[IFLA_ADDRESS]) == ETH_ALEN) {
-        const unsigned char *mac_bytes = RTA_DATA(attr_table[IFLA_ADDRESS]);
+        const unsigned char *const mac_bytes = RTA_DATA(attr_table[IFLA_ADDRESS]);
 
         snprintf(mac_field, sizeof(mac_field), " mac %02x:%02x:%02x:%02x:%02x:%02x", mac_bytes[0],
                  mac_bytes[1], mac_bytes[2], mac_bytes[3], mac_bytes[4], mac_bytes[5]);
@@ -99,7 +99,7 @@ int main(void)
 
     memset(&request, 0, sizeof(request));
 
-    struct ifinfomsg *link_info = NLMSG_DATA(&request.nl_header);
+    struct ifinfomsg *const link_info = NLMSG_DATA(&request.nl_header);
 
     request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(*link_info));
     request.nl_header.nlmsg_type = RTM_GETLINK;

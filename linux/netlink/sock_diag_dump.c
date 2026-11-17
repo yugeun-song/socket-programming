@@ -38,7 +38,7 @@ static const char *const gs_state_names[13] = {
 
 static void print_socket_helper(const struct nlmsghdr *const nl_header)
 {
-    const struct inet_diag_msg *diag_msg = NLMSG_DATA(nl_header);
+    const struct inet_diag_msg *const diag_msg = NLMSG_DATA(nl_header);
 
     if (nl_header->nlmsg_len < NLMSG_LENGTH(sizeof(*diag_msg))) {
         return;

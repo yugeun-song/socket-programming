@@ -35,7 +35,7 @@ static void print_family_helper(const struct nlmsghdr *const nl_header)
         return;
     }
 
-    const char *message_data = NLMSG_DATA(nl_header);
+    const char *const message_data = NLMSG_DATA(nl_header);
     struct rtattr *attr_table[CTRL_ATTR_MAX + 1];
 
     nl_parse_attrs_helper(attr_table, CTRL_ATTR_MAX,

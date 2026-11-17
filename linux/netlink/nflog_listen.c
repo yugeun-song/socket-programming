@@ -48,7 +48,7 @@ static int nfl_configure_helper(int fd, unsigned short group, unsigned short att
     memset(&request, 0, sizeof(request));
 
     unsigned int seq = nl_get_next_seq_helper();
-    struct nfgenmsg *nf_header = NLMSG_DATA(&request.nl_header);
+    struct nfgenmsg *const nf_header = NLMSG_DATA(&request.nl_header);
 
     request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(*nf_header));
     request.nl_header.nlmsg_type = (NFNL_SUBSYS_ULOG << 8) | NFULNL_MSG_CONFIG;
@@ -113,9 +113,9 @@ static void format_ifname_helper(char *const mut_out, size_t len,
 
 static void print_packet_helper(const struct nlmsghdr *const nl_header)
 {
-    const char *message_data = NLMSG_DATA(nl_header);
-    const struct rtattr *attrs = (const struct rtattr *)(message_data +
-                                                         NLMSG_ALIGN(sizeof(struct nfgenmsg)));
+    const char *const message_data = NLMSG_DATA(nl_header);
+    const struct rtattr *const attrs = (const struct rtattr *)(message_data +
+                                                               NLMSG_ALIGN(sizeof(struct nfgenmsg)));
     struct rtattr *attr_table[NFULA_MAX + 1];
 
     nl_parse_attrs_helper(attr_table, NFULA_MAX, attrs,
@@ -125,8 +125,8 @@ static void print_packet_helper(const struct nlmsghdr *const nl_header)
         return;
     }
 
-    const struct nfulnl_msg_packet_hdr *packet_header = RTA_DATA(attr_table[NFULA_PACKET_HDR]);
-    const unsigned char *payload = RTA_DATA(attr_table[NFULA_PAYLOAD]);
+    const struct nfulnl_msg_packet_hdr *const packet_header = RTA_DATA(attr_table[NFULA_PACKET_HDR]);
+    const unsigned char *const payload = RTA_DATA(attr_table[NFULA_PAYLOAD]);
     int captured_len = (int)RTA_PAYLOAD(attr_table[NFULA_PAYLOAD]);
     char in_ifname[IF_NAMESIZE] = { 0 };
     char out_ifname[IF_NAMESIZE] = { 0 };

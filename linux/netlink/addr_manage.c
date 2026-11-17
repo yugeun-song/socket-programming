@@ -47,7 +47,7 @@ static void print_usage_helper(const char *const program_name)
 static int parse_cidr_helper(struct in_addr *const mut_ip, unsigned char *const mut_prefix,
                              const char *const cidr_text)
 {
-    const char *slash_at = strchr(cidr_text, '/');
+    const char *const slash_at = strchr(cidr_text, '/');
     if (slash_at == NULL) {
         errno = EINVAL;
         return -1;
@@ -82,7 +82,7 @@ static int parse_cidr_helper(struct in_addr *const mut_ip, unsigned char *const 
 
 static void print_addr_helper(const struct nlmsghdr *const nl_header)
 {
-    const struct ifaddrmsg *addr_info = NLMSG_DATA(nl_header);
+    const struct ifaddrmsg *const addr_info = NLMSG_DATA(nl_header);
     struct rtattr *attr_table[IFA_MAX + 1];
 
     nl_parse_attrs_helper(attr_table, IFA_MAX, IFA_RTA(addr_info), (int)IFA_PAYLOAD(nl_header));
@@ -172,7 +172,7 @@ static int change_addr_helper(int fd, unsigned short msg_type, unsigned short ex
     memset(&request, 0, sizeof(request));
 
     unsigned int seq = nl_get_next_seq_helper();
-    struct ifaddrmsg *addr_info = NLMSG_DATA(&request.nl_header);
+    struct ifaddrmsg *const addr_info = NLMSG_DATA(&request.nl_header);
 
     request.nl_header.nlmsg_len = NLMSG_LENGTH(sizeof(*addr_info));
     request.nl_header.nlmsg_type = msg_type;

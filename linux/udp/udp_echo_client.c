@@ -14,8 +14,8 @@
 
 int main(int argc, char *argv[])
 {
-    const char *host = (argc > 1) ? argv[1] : "127.0.0.1";
-    const char *text_to_send = (argc > 2) ? argv[2] : "hello, udp";
+    const char *const host = (argc > 1) ? argv[1] : "127.0.0.1";
+    const char *const text_to_send = (argc > 2) ? argv[2] : "hello, udp";
 
     int fd = udp_connect_helper(host, PORT_HELPER);
     if (fd < 0) {
