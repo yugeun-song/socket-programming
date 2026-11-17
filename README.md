@@ -15,7 +15,7 @@ with two differences:
   declaring it.
 
 The `Winsock/` code is Windows-only and keeps the Windows style, through its own `.clang-format`
-and `.editorconfig`.
+and `.editorconfig`. Its pointer declarations still follow the `const` rules of that style guide.
 
 ## Layout
 

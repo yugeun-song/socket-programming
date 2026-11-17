@@ -7,8 +7,8 @@
 
 int main(int argc, char** argv)
 {
-    const char* host = (argc > 1) ? argv[1] : "127.0.0.1";
-    const char* message = (argc > 2) ? argv[2] : "hello, winsock";
+    const char* const host = (argc > 1) ? argv[1] : "127.0.0.1";
+    const char* const message = (argc > 2) ? argv[2] : "hello, winsock";
     char logBuf[ADDR_TEXT_MAX_HELPER];
     char recvBuf[BUFFER_SIZE_HELPER];
     SOCKET sock;

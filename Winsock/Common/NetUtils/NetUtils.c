@@ -5,7 +5,7 @@
 
 #define LOG_LINE_MAX_HELPER 512
 
-void LogWriteHelper(const char* func, const char* fmt, ...)
+void LogWriteHelper(const char* const func, const char* const fmt, ...)
 {
     va_list args;
 
@@ -17,7 +17,7 @@ void LogWriteHelper(const char* func, const char* fmt, ...)
     fflush(stderr);
 }
 
-void LogWriteResultHelper(const char* fmt, ...)
+void LogWriteResultHelper(const char* const fmt, ...)
 {
     char body[LOG_LINE_MAX_HELPER];
     va_list args;
@@ -30,7 +30,7 @@ void LogWriteResultHelper(const char* fmt, ...)
     fflush(stdout);
 }
 
-void LogWinsockErrorHelper(const char* func, const char* context)
+void LogWinsockErrorHelper(const char* const func, const char* const context)
 {
     char* message = NULL;
     DWORD messageLength;
@@ -93,7 +93,7 @@ SOCKET BindSocketHelper(int sockType, unsigned short port)
     return sock;
 }
 
-SOCKET ConnectSocketHelper(int sockType, const char* host, unsigned short port)
+SOCKET ConnectSocketHelper(int sockType, const char* const host, unsigned short port)
 {
     SOCKET sock;
     struct sockaddr_in addr;
@@ -145,7 +145,7 @@ SOCKET ListenTcpHelper(unsigned short port, int backlog)
     return sock;
 }
 
-int SendAllHelper(SOCKET sock, const char* sendBuf, int length)
+int SendAllHelper(SOCKET sock, const char* const sendBuf, int length)
 {
     int sentTotal = 0;
     int sentBytes;
@@ -163,7 +163,7 @@ int SendAllHelper(SOCKET sock, const char* sendBuf, int length)
     return 0;
 }
 
-int FormatAddrHelper(const struct sockaddr_in* addr, char* out, size_t size)
+int FormatAddrHelper(const struct sockaddr_in* const addr, char* const out, size_t size)
 {
     char host[INET_ADDRSTRLEN];
 
@@ -178,7 +178,7 @@ int FormatAddrHelper(const struct sockaddr_in* addr, char* out, size_t size)
     return 0;
 }
 
-int FormatPeerHelper(SOCKET sock, char* out, size_t size)
+int FormatPeerHelper(SOCKET sock, char* const out, size_t size)
 {
     struct sockaddr_in addr;
     int addrLength = (int)sizeof(addr);
