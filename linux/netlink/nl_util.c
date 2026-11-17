@@ -11,6 +11,9 @@
 
 #include "common/net_util.h"
 
+static pthread_mutex_t gs_seq_counter_lock;
+static unsigned int gs_seq_counter;
+
 static ssize_t nl_recv_helper(int fd, void *const mut_recv_buf, size_t len)
 {
     struct sockaddr_nl from = { 0 };
@@ -179,15 +182,27 @@ int nl_check_done_helper(const struct nlmsghdr *const nl_header)
     return -1;
 }
 
+int nl_init_seq_helper(void)
+{
+    int error_code = pthread_mutex_init(&gs_seq_counter_lock, NULL);
+    if (error_code != 0) {
+        errno = error_code;
+        return -1;
+    }
+    return 0;
+}
+
+void nl_destroy_seq_helper(void)
+{
+    pthread_mutex_destroy(&gs_seq_counter_lock);
+}
+
 unsigned int nl_get_next_seq_helper(void)
 {
-    static pthread_mutex_t s_counter_lock = PTHREAD_MUTEX_INITIALIZER;
-    static unsigned int s_counter;
-
-    pthread_mutex_lock(&s_counter_lock);
-    ++s_counter;
-    unsigned int seq = s_counter;
-    pthread_mutex_unlock(&s_counter_lock);
+    pthread_mutex_lock(&gs_seq_counter_lock);
+    ++gs_seq_counter;
+    unsigned int seq = gs_seq_counter;
+    pthread_mutex_unlock(&gs_seq_counter_lock);
 
     return seq;
 }

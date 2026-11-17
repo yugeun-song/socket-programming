@@ -177,13 +177,18 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    int fd = nl_open_helper(NETLINK_NETFILTER);
-    if (fd < 0) {
-        LOG_ERRNO_HELPER("nl_open_helper(NETLINK_NETFILTER)");
+    if (nl_init_seq_helper() < 0) {
+        LOG_ERRNO_HELPER("nl_init_seq_helper()");
         return EXIT_FAILURE;
     }
 
     int exit_status = EXIT_FAILURE;
+    int fd = nl_open_helper(NETLINK_NETFILTER);
+    if (fd < 0) {
+        LOG_ERRNO_HELPER("nl_open_helper(NETLINK_NETFILTER)");
+        goto out_destroy_seq;
+    }
+
     struct nfulnl_msg_config_cmd cmd = {
         .command = NFULNL_CFG_CMD_BIND
     };
@@ -236,5 +241,7 @@ int main(int argc, char *argv[])
 
 out_close_fd:
     close(fd);
+out_destroy_seq:
+    nl_destroy_seq_helper();
     return exit_status;
 }

@@ -65,13 +65,18 @@ static void print_family_helper(const struct nlmsghdr *const nl_header)
 
 int main(void)
 {
-    int fd = nl_open_helper(NETLINK_GENERIC);
-    if (fd < 0) {
-        LOG_ERRNO_HELPER("nl_open_helper(NETLINK_GENERIC)");
+    if (nl_init_seq_helper() < 0) {
+        LOG_ERRNO_HELPER("nl_init_seq_helper()");
         return EXIT_FAILURE;
     }
 
     int exit_status = EXIT_FAILURE;
+    int fd = nl_open_helper(NETLINK_GENERIC);
+    if (fd < 0) {
+        LOG_ERRNO_HELPER("nl_open_helper(NETLINK_GENERIC)");
+        goto out_destroy_seq;
+    }
+
     unsigned int seq = nl_get_next_seq_helper();
     struct genl_request request = { 0 };
 
@@ -137,5 +142,7 @@ int main(void)
 
 out_close_fd:
     close(fd);
+out_destroy_seq:
+    nl_destroy_seq_helper();
     return exit_status;
 }

@@ -142,9 +142,10 @@ any moment, even where the program is single threaded and installs no handler:
   up; non-blocking it returns in 0.000207 s and the loop sees `EAGAIN`.
 - No mutable globals beyond two signal flags, the shutdown flag in `common/net_util.c` and
   `route_monitor`'s `SIGUSR1` report flag; a shared counter takes a mutex, with
-  `nl_get_next_seq_helper` handing out netlink sequence numbers under `PTHREAD_MUTEX_INITIALIZER`.
-  The tree builds as `-std=c99`, which predates `<stdatomic.h>`, and an uncontended glibc mutex is a
-  userspace compare-exchange with no `futex` call: 2.27 ns against 9.50 ns for a
+  `nl_get_next_seq_helper` handing out netlink sequence numbers under it. `nl_init_seq_helper` sets
+  the mutex up with `pthread_mutex_init` before the first request, and `nl_destroy_seq_helper`
+  destroys it. The tree builds as `-std=c99`, which predates `<stdatomic.h>`, and an uncontended
+  glibc mutex is a userspace compare-exchange with no `futex` call: 2.27 ns against 9.50 ns for a
   `pthread_spinlock_t`.
 - Only thread-safe library calls: `strerror_r` not `strerror`, `inet_ntop` not `inet_ntoa`,
   `if_indextoname` into a caller buffer.
@@ -292,11 +293,12 @@ The tcp, udp and splice servers all bind 5000, so those stanzas run one at a tim
   so `LOG_ERRNO_HELPER` does not.
 - `netlink/nl_util.{c,h}` — `nl_open_helper`, `nl_join_group_helper`, `nl_set_rcvbuf_helper`,
   `nl_send_helper`, `nl_recv_or_shutdown_helper`, `nl_add_attr_helper`, `nl_parse_attrs_helper`,
-  `nl_check_error_helper`, `nl_check_done_helper`, `nl_get_next_seq_helper`. It sits beside its only
-  consumer rather than in `common/`, which is for code more than one topic uses; a helper moves
-  there on the second caller, the way iproute2 keeps `lib/libnetlink.c` in a library directory for
-  `ip`, `ss`, `tc` and `bridge`. The Makefile's `TOPIC_LIB_SRCS` marks such a file as a library
-  object: compiled, not linked as a program of its own.
+  `nl_check_error_helper`, `nl_check_done_helper`, `nl_init_seq_helper`, `nl_destroy_seq_helper`,
+  `nl_get_next_seq_helper`. It sits beside its only consumer rather than in `common/`, which is for
+  code more than one topic uses; a helper moves there on the second caller, the way iproute2 keeps
+  `lib/libnetlink.c` in a library directory for `ip`, `ss`, `tc` and `bridge`. The Makefile's
+  `TOPIC_LIB_SRCS` marks such a file as a library object: compiled, not linked as a program of its
+  own.
 - `tcp/` — `tcp_echo_server.c`, `tcp_echo_client.c`. `udp/` — `udp_echo_server.c`,
   `udp_echo_client.c`.
 - `zerocopy/` — `sendfile_server.c`, `sendfile_client.c`, `splice_echo_server.c`,

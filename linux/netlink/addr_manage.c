@@ -261,13 +261,17 @@ int main(int argc, char *argv[])
         }
     }
 
-    int fd = nl_open_helper(NETLINK_ROUTE);
-    if (fd < 0) {
-        LOG_ERRNO_HELPER("nl_open_helper()");
+    if (nl_init_seq_helper() < 0) {
+        LOG_ERRNO_HELPER("nl_init_seq_helper()");
         return EXIT_FAILURE;
     }
 
-    int result;
+    int result = -1;
+    int fd = nl_open_helper(NETLINK_ROUTE);
+    if (fd < 0) {
+        LOG_ERRNO_HELPER("nl_open_helper()");
+        goto out_destroy_seq;
+    }
 
     if (is_listing != 0) {
         result = list_addrs_helper(fd);
@@ -285,5 +289,7 @@ int main(int argc, char *argv[])
     }
 
     close(fd);
+out_destroy_seq:
+    nl_destroy_seq_helper();
     return (result < 0) ? EXIT_FAILURE : 0;
 }

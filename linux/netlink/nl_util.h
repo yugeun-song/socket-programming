@@ -24,6 +24,9 @@ void nl_parse_attrs_helper(struct rtattr **const mut_attr_table, unsigned short 
 
 int nl_check_error_helper(const struct nlmsghdr *const nl_header);
 int nl_check_done_helper(const struct nlmsghdr *const nl_header);
+
+int nl_init_seq_helper(void);
+void nl_destroy_seq_helper(void);
 unsigned int nl_get_next_seq_helper(void);
 
 #endif /* NETLINK_NL_UTIL_H */
