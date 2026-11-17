@@ -7,7 +7,7 @@ build system all differ by platform.
 ## Coding style
 
 The Linux code follows the
-[c-programming coding style](https://github.com/yugeun-song/c-programming/blob/main/docs/coding-style.md).
+[c-programming coding style](https://github.com/yugeun-song/c-programming/blob/main/docs/coding-style.en.md).
 The Winsock code is Windows-only and keeps the Windows style, through its own `.clang-format` and
 `.editorconfig`.
 
