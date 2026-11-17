@@ -17,7 +17,7 @@
 #define CHUNK_HELPER 65536
 
 enum pipe_end {
-    PIPE_READ_HELPER,
+    PIPE_READ_HELPER = 0,
     PIPE_WRITE_HELPER
 };
 
