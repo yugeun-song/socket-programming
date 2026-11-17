@@ -55,7 +55,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(PlatformToolset)' == 'ClangCL'">
     <ClCompile>
-      <AdditionalOptions>-Wshadow /clang:-pedantic -Werror=format-security /clang:-fno-omit-frame-pointer %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/clang:-std=c99 -Wshadow /clang:-pedantic -Werror=format-security /clang:-fno-omit-frame-pointer %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(PlatformToolset)' == 'ClangCL' And ('$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Sanitize')">

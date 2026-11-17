@@ -446,4 +446,5 @@ which MSBuild imports into every project under `Winsock/`, a new one included. T
 counterparts of the `linux/` build flags: Debug is `/Od /Ob0 /Oi- /Zi /JMC- /GS-` without `/sdl`,
 `/RTC` or ASLR but with the warnings `/sdl` makes errors, Sanitize adds AddressSanitizer, and
 Release is `/O2 /sdl /guard:cf` with LTO, `/CETCOMPAT` and ASLR. Every configuration gets
-`/W4 /utf-8 /Zc:preprocessor /we4774`, and the x64 builds `/guard:ehcont`.
+`/W4 /utf-8 /Zc:preprocessor /we4774`, and the x64 builds `/guard:ehcont`. The ClangCL toolset also
+gets `/clang:-std=c99`, since Visual Studio passes clang-cl no C99 option.
