@@ -6,10 +6,16 @@ build system all differ by platform.
 
 ## Coding style
 
-The Linux code follows the
-[c-programming coding style](https://github.com/yugeun-song/c-programming/blob/main/docs/coding-style.en.md).
-The Winsock code is Windows-only and keeps the Windows style, through its own `.clang-format` and
-`.editorconfig`.
+The `linux/` code follows the
+[c-programming coding style](https://github.com/yugeun-song/c-programming/blob/main/docs/coding-style.en.md),
+with two differences:
+
+- Include guards spell the path from `linux/`, the root of that tree (`COMMON_LOG_H`).
+- `<linux/errqueue.h>` sorts last in its include block, because it uses `struct timespec` without
+  declaring it.
+
+The `Winsock/` code is Windows-only and keeps the Windows style, through its own `.clang-format`
+and `.editorconfig`.
 
 ## Layout
 
